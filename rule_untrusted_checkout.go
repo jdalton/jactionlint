@@ -1,8 +1,7 @@
 package jactionlint
 
 import (
-	"os"
-	"path/filepath"
+	"maps"
 	"slices"
 	"strings"
 
@@ -22,6 +21,11 @@ type RuleUntrustedCheckout struct {
 	// fetches are the fetches of an untrusted revision in the steps before the current one that no command has put
 	// in the working tree yet, see pendingFetch.
 	fetches []*pendingFetch
+	// carried are the variables that earlier steps of the job wrote to $GITHUB_ENV with an untrusted value, with where
+	// the value comes from.
+	carried map[string]string
+	// scripts are the script files that were read, by path, nil for one that cannot be followed.
+	scripts map[string]*runscript.Script
 }
 
 // pendingFetch is a `git fetch` of a revision of a pull request whose script does not put it in the working tree.
@@ -54,6 +58,8 @@ type untrustedCheckout struct {
 	// not see the code.
 	offset int
 	step   *Step
+	// how is what runs the code already, when the script file that does the checkout runs it itself.
+	how string
 }
 
 // VisitWorkflowPre is callback when visiting Workflow node before visiting its children.
@@ -75,7 +81,7 @@ func (rule *RuleUntrustedCheckout) VisitJobPre(n *Job) error {
 	// step runs code depends on the directory only, so it is asked once for each directory and not for
 	// each checkout: a job with thousands of checkouts is not quadratic.
 	rule.job = n
-	rule.fetches = nil
+	rule.fetches, rule.carried = nil, nil
 	pending := map[string][]*untrustedCheckout{}
 	var dirs []string // the keys of pending in the order they were added
 	for _, s := range flattenSteps(n.Steps) {
@@ -95,6 +101,10 @@ func (rule *RuleUntrustedCheckout) VisitJobPre(n *Job) error {
 			}
 		}
 		for _, c := range rule.checkoutsOf(n, s) {
+			if c.how != "" {
+				rule.report(c, c.how)
+				continue
+			}
 			if run, ok := s.Exec.(*ExecRun); ok && run.Run != nil {
 				// The same script can run the code it fetched
 				if how, ok := stepRunsCode(s, c.dir, c.offset+1); ok {
@@ -164,11 +174,28 @@ func (rule *RuleUntrustedCheckout) checkoutsOf(j *Job, s *Step) []*untrustedChec
 		if script == nil {
 			return nil
 		}
-		env := untrustedEnvNames(rule.wf, j, s)
+		// the environment of the step: the env of the workflow and the job, what earlier steps wrote to $GITHUB_ENV,
+		// then the env of the step
+		process := map[string]string{}
+		if rule.wf != nil {
+			envDescs(rule.wf.Env, process)
+		}
+		envDescs(j.Env, process)
+		maps.Copy(process, rule.carried)
+		envDescs(s.Env, process)
+		taint := newRevTaint(script, process)
 		var ret []*untrustedCheckout
 		earlier := rule.fetches
 		for i, c := range script.Commands {
+			var env map[string]bool
+			if c.Name == "git" || c.Name == "gh" {
+				env = taint.names(c.Offset)
+			}
+			fetchAt := c.Offset // where the revision reaches the working tree, for what runs after it
 			what, ok := commandChecksOutUntrusted(c, env)
+			if ok {
+				what = taint.describe(what, c.Offset)
+			}
 			pos := s.Pos
 			if e.RunPos != nil {
 				pos = e.RunPos
@@ -185,17 +212,28 @@ func (rule *RuleUntrustedCheckout) checkoutsOf(j *Job, s *Step) []*untrustedChec
 			}
 			if !ok {
 				// a script of the repository that puts the fetched revision in the working tree
-				if f := rule.scriptUsingFetch(c, s, earlier); f != nil {
+				if f := rule.scriptUsingFetch(c, s, earlier, taint); f != nil {
 					// the offset starts one before the command so that the script itself counts as running the code
 					ret = append(ret, &untrustedCheckout{pos: f.pos, what: f.what, offset: c.Offset - 1, step: s})
+				}
+			}
+			if !ok {
+				// a script file of the project that checks out a revision it is given, or that it takes from the
+				// environment, see untrusted_checkout_flow.go
+				if w, how, found := rule.followScript(taint, c, process, stepWorkdir(s), maxScriptDepth); found {
+					off := c.Offset + 1 // the call itself is not the code that runs
+					ret = append(ret, &untrustedCheckout{pos: pos, what: w, offset: off, step: s, how: how})
+					continue
 				}
 			}
 			if !ok && c.Name == "git" && c.Verb() == "fetch" {
 				// A fetch only downloads the objects: it checks out the code when a later command in
 				// the script puts what it fetched in the working tree.
 				if w, bad := commandNamesUntrusted(c, env); bad {
-					if fetchedThenUsed(script.Commands[i+1:]) {
+					w = taint.describe(w, c.Offset)
+					if k := firstWorkTree(script.Commands[i+1:]); k >= 0 {
 						what, ok = w, true
+						fetchAt = script.Commands[i+1+k].Offset
 					} else {
 						rule.fetches = append(rule.fetches, &pendingFetch{pos: pos, what: w, names: fetchedNames(c)})
 					}
@@ -206,9 +244,10 @@ func (rule *RuleUntrustedCheckout) checkoutsOf(j *Job, s *Step) []*untrustedChec
 				if c.Name == "git" && c.Verb() == "clone" && len(c.Positional) > 2 {
 					dir = normalizeDir(c.Sub(2))
 				}
-				ret = append(ret, &untrustedCheckout{pos: pos, what: what, dir: dir, offset: c.Offset, step: s})
+				ret = append(ret, &untrustedCheckout{pos: pos, what: what, dir: dir, offset: fetchAt, step: s})
 			}
 		}
+		rule.carryEnv(script, taint, s.If != nil)
 		return ret
 	}
 	return nil
@@ -240,29 +279,20 @@ func scriptPath(c *runscript.Command) string {
 // scriptUsingFetch returns the earlier fetch whose revision the script file that the command runs puts in the working
 // tree, and forgets it. The script is read from the project, and only when it names FETCH_HEAD or a destination of
 // the fetch literally in a command that changes the working tree, so a script that merely exists is not reported.
-func (rule *RuleUntrustedCheckout) scriptUsingFetch(c *runscript.Command, s *Step, earlier []*pendingFetch) *pendingFetch {
-	if rule.project == nil || rule.project.root == "" || !slices.ContainsFunc(earlier, func(f *pendingFetch) bool { return f != nil }) {
+func (rule *RuleUntrustedCheckout) scriptUsingFetch(c *runscript.Command, s *Step, earlier []*pendingFetch, t *revTaint) *pendingFetch {
+	if !slices.ContainsFunc(earlier, func(f *pendingFetch) bool { return f != nil }) {
 		return nil
 	}
 	rel := scriptPath(c)
 	if rel == "" {
 		return nil
 	}
-	path := filepath.Join(rule.project.root, filepath.FromSlash(stepWorkdir(s)), filepath.FromSlash(rel))
-	real, err := filepath.EvalSymlinks(path)
-	root, rerr := filepath.EvalSymlinks(rule.project.root)
-	if err != nil || rerr != nil || !isPathInDir(root, real) {
+	cwd, known := t.cwdAt(stepWorkdir(s), c.Offset)
+	if !known {
 		return nil
 	}
-	if fi, err := os.Stat(real); err != nil || !fi.Mode().IsRegular() || fi.Size() > maxScriptSize {
-		return nil
-	}
-	b, err := os.ReadFile(real)
-	if err != nil {
-		return nil
-	}
-	script, err := runscript.Analyze(string(b), "")
-	if err != nil || script == nil {
+	script := rule.readScript(cwd, rel)
+	if script == nil {
 		return nil
 	}
 	for k, f := range earlier {
@@ -280,7 +310,7 @@ func (rule *RuleUntrustedCheckout) scriptUsingFetch(c *runscript.Command, s *Ste
 }
 
 // gitCheckoutVerbs are the git commands that put a revision in the working tree. A "fetch" is not one:
-// it only downloads objects, see fetchedThenUsed.
+// it only downloads objects, see firstWorkTree.
 var gitCheckoutVerbs = map[string]bool{
 	"checkout": true, "switch": true, "pull": true, "merge": true, "cherry-pick": true,
 	"rebase": true, "clone": true, "reset": true, "restore": true,
@@ -346,16 +376,6 @@ func fetchedNames(c *runscript.Command) []string {
 func wordsName(c *runscript.Command, names []string) bool {
 	for _, w := range c.Words {
 		if !w.Dynamic() && slices.Contains(names, w.Value) {
-			return true
-		}
-	}
-	return false
-}
-
-// fetchedThenUsed reports whether one of the commands puts a fetched revision in the working tree.
-func fetchedThenUsed(rest []*runscript.Command) bool {
-	for _, c := range rest {
-		if c.Name == "git" && workTreeVerbs[c.Verb()] {
 			return true
 		}
 	}
