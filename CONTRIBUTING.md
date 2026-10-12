@@ -109,6 +109,10 @@ proficient in English.
 
 [mise](https://mise.jdx.dev/) installs the tools and runs the tasks (`mise tasks` lists them).
 
+The sparse `upstream/actionlint` checkout is a source reference for review. The compatibility test uses jactionlint's local fixture copies and expected outputs. Run `mise run setup:upstream` after cloning; the `mise run test` task and CI prepare the source reference. Use `mise run check:upstream` to verify its accepted pin. Run `mise run update:upstream` to review a release candidate. Then set `JACTIONLINT_UPSTREAM_TAG` and `JACTIONLINT_UPSTREAM_SHA` to the reviewed values and run `mise run apply:upstream`.
+
+Node-backed tasks need Node.js 22 or newer. Their launcher reuses a compatible `node` or `npm` already on `PATH`, including a Socket Firewall wrapper. It uses `mise exec node@lts` for that task when Node.js is missing or too old. It does not edit shell startup files or global mise settings. The fleet installer owns fleet-wide shell activation, diagnostics, update policy, and Socket Firewall configuration.
+
 ```sh
 mise install
 ```

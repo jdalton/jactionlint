@@ -4,7 +4,6 @@
 # GOTOOLCHAIN=local, while go.mod's `toolchain go1.27.2` supplies the fixed standard library to builds,
 # tests and govulncheck. Unpin once staticcheck supports the new export data.
 go = "1.27.1"
-node = "lts"
 hk = "latest"
 pkl = "latest"
 shellcheck = "latest"
@@ -36,9 +35,35 @@ run = "go test -run TestRuleIDsAreStable -update-rule-ids={{arg(name=\"name\")}}
 
 [tasks.test]
 description = "Run all tests"
+depends = ["setup:upstream"]
 run = "go test -race ./..."
 # -race needs cgo, which is hard to set up on Windows
 run_windows = "go test ./..."
+
+[tasks."setup:upstream"]
+description = "Materialize the pinned sparse actionlint fixture reference"
+run = "bash ./scripts/upstream/run-node.sh node ./scripts/upstream/main.mjs setup"
+run_windows = "pwsh -NoProfile -File ./scripts/upstream/run-node.ps1 node ./scripts/upstream/main.mjs setup"
+
+[tasks."check:upstream"]
+description = "Check the local actionlint reference matches its accepted pin"
+run = "bash ./scripts/upstream/run-node.sh node ./scripts/upstream/main.mjs check"
+run_windows = "pwsh -NoProfile -File ./scripts/upstream/run-node.ps1 node ./scripts/upstream/main.mjs check"
+
+[tasks."update:upstream"]
+description = "Plan an actionlint upstream pin update"
+run = "bash ./scripts/upstream/run-node.sh node ./scripts/upstream/main.mjs update"
+run_windows = "pwsh -NoProfile -File ./scripts/upstream/run-node.ps1 node ./scripts/upstream/main.mjs update"
+
+[tasks."apply:upstream"]
+description = "Accept a reviewed actionlint release; set JACTIONLINT_UPSTREAM_TAG and JACTIONLINT_UPSTREAM_SHA from update:upstream"
+run = 'bash ./scripts/upstream/run-node.sh node ./scripts/upstream/main.mjs update --apply "${JACTIONLINT_UPSTREAM_TAG:?set JACTIONLINT_UPSTREAM_TAG}" "${JACTIONLINT_UPSTREAM_SHA:?set JACTIONLINT_UPSTREAM_SHA}" --accept-reviewed'
+run_windows = 'pwsh -NoProfile -File ./scripts/upstream/run-node.ps1 node ./scripts/upstream/main.mjs update --apply "$env:JACTIONLINT_UPSTREAM_TAG" "$env:JACTIONLINT_UPSTREAM_SHA" --accept-reviewed'
+
+[tasks."test:upstream-manager"]
+description = "Test upstream pin parsing and release selection"
+run = "bash ./scripts/upstream/run-node.sh node --test ./scripts/upstream/main.test.mjs"
+run_windows = "pwsh -NoProfile -File ./scripts/upstream/run-node.ps1 node --test ./scripts/upstream/main.test.mjs"
 
 [tasks.cov]
 description = "Generate coverage.html and print the coverage per function"
@@ -85,8 +110,8 @@ run = "bash ./scripts/build-man.bash"
 
 [tasks.matcher]
 description = "Generate .github/jactionlint-matcher.json"
-tools = { node = "lts" }
-run = "node ./scripts/generate-jactionlint-matcher/main.mjs .github/jactionlint-matcher.json"
+run = "bash ./scripts/upstream/run-node.sh node ./scripts/generate-jactionlint-matcher/main.mjs .github/jactionlint-matcher.json"
+run_windows = "pwsh -NoProfile -File ./scripts/upstream/run-node.ps1 node ./scripts/generate-jactionlint-matcher/main.mjs .github/jactionlint-matcher.json"
 
 [tasks."matcher:fixtures"]
 description = "Update the test data of generate-jactionlint-matcher after the default error format changes"
@@ -122,21 +147,25 @@ run = "bash ./scripts/build-wasm.bash"
 description = "Run the documentation site (VitePress) with live reload"
 depends = ["docs:wasm"]
 dir = "docs"
-run = "npm install && exec npm run docs:dev"
+run = ["bash ../scripts/upstream/run-node.sh npm install", "bash ../scripts/upstream/run-node.sh npm run docs:dev"]
+run_windows = ["pwsh -NoProfile -File ../scripts/upstream/run-node.ps1 npm install", "pwsh -NoProfile -File ../scripts/upstream/run-node.ps1 npm run docs:dev"]
 
 [tasks."docs:build"]
 description = "Build the documentation site (VitePress) into docs/.vitepress/dist; fails on dead links"
 depends = ["docs:wasm"]
 dir = "docs"
-run = "npm ci && npm run docs:build"
+run = ["bash ../scripts/upstream/run-node.sh npm ci", "bash ../scripts/upstream/run-node.sh npm run docs:build"]
+run_windows = ["pwsh -NoProfile -File ../scripts/upstream/run-node.ps1 npm ci", "pwsh -NoProfile -File ../scripts/upstream/run-node.ps1 npm run docs:build"]
 
 [tasks."docs:preview"]
 description = "Serve the built documentation site"
 dir = "docs"
-run = "npm run docs:preview"
+run = "bash ../scripts/upstream/run-node.sh npm run docs:preview"
+run_windows = "pwsh -NoProfile -File ../scripts/upstream/run-node.ps1 npm run docs:preview"
 
 [tasks."docs:test"]
 description = "Test the playground: permalink codec and the real wasm against the links in docs/checks.md"
 depends = ["docs:wasm"]
 dir = "docs"
-run = "npm ci && npm test"
+run = ["bash ../scripts/upstream/run-node.sh npm ci", "bash ../scripts/upstream/run-node.sh npm test"]
+run_windows = ["pwsh -NoProfile -File ../scripts/upstream/run-node.ps1 npm ci", "pwsh -NoProfile -File ../scripts/upstream/run-node.ps1 npm test"]

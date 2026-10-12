@@ -1,0 +1,28 @@
+{
+  "area": "jactionlint",
+  "description": "Tracks the upstream actionlint implementation and fixture sources. jactionlint keeps its own curated fixtures and expected diagnostics.",
+  "upstreams": {
+    "actionlint": {
+      "submodule": "upstream/actionlint",
+      "repo": "https://github.com/rhysd/actionlint"
+    }
+  },
+  "rows": [
+    {
+      "kind": "version-pin",
+      "id": "actionlint",
+      "upstream": "actionlint",
+      "upgrade_policy": "track-latest",
+      "criticality": 10,
+      "materialization": "sparse",
+      "sparse_cone": ["*.go", "go.mod", "go.sum", "cmd", "testdata/err", "testdata/examples"],
+      "notes": "Compatibility tests use curated local copies of actionlint-origin fixtures and expected outputs. Review upstream source and fixture drift before accepting a newer pin.",
+      "pinned_tag": "v1.7.12",
+      "verification": {
+        "script": "scripts/upstream/main.mjs",
+        "inputs": ["actionlint_compat_test.go", "config_helpers_test.go", "go.mod", "go.sum", "scripts/upstream/main.mjs", "testdata/actionlint_originals.txt", "testdata/err/*.config", "testdata/err/*.yaml", "testdata/err/*.out", "testdata/examples/*.config", "testdata/examples/*.yaml", "testdata/examples/*.out"],
+        "timeout_seconds": 600
+      }
+    }
+  ]
+}

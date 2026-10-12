@@ -1,0 +1,9 @@
+# actionlint-v1.7.12 sha256:454800bd4f854592bcfe79b161f71d56e35940eb7016e48a26dd356adc9d400a
+[submodule "upstream/actionlint"]
+	path = upstream/actionlint
+	url = https://github.com/rhysd/actionlint.git
+	ignore = dirty
+	ref = 914e7df21a07ef503a81201c76d2b11c789d3fca # v1.7.12
+	branch = v1.7.12
+	shallow = true
+	sparse-checkout = /*.go /go.mod /go.sum /cmd/** /testdata/err/** /testdata/examples/**
