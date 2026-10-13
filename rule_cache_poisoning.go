@@ -163,8 +163,13 @@ var cacheActions = []cacheAction{
 		return strings.Contains(v, "type=gha"), "remove the \"cache-from\" input"
 	}},
 	{"docker/setup-buildx-action", func(a *ExecAction, u *UsesRef) (bool, string) {
-		// The buildx binary is cached in the GitHub Actions cache unless "cache-binary" is false (input of v3)
+		// The buildx binary is cached in the GitHub Actions cache unless "cache-binary" is false (input of v3), but the
+		// action downloads it only when "version" is set or the runner has no buildx. The images of the runners of
+		// GitHub have it, so without "version" nothing is restored there (zizmor asks for "version" too).
 		if v, ok := a.input("cache-binary"); ok && isFalseLiteral(v) {
+			return false, ""
+		}
+		if v, _ := a.input("version"); strings.TrimSpace(v) == "" {
 			return false, ""
 		}
 		if major, ok := majorOf(u); ok && major < 3 {
@@ -192,6 +197,21 @@ var cacheActions = []cacheAction{
 		}
 		return true, "set \"use-cache: false\""
 	}},
+	{"pyo3/maturin-action", func(a *ExecAction, u *UsesRef) (bool, string) {
+		// "sccache: true" (or "cache: sccache") makes the action set SCCACHE_GHA_ENABLED, which makes sccache
+		// restore its compiler outputs from the GitHub Actions cache
+		if _, ok := inputEnabled(a, "sccache"); ok {
+			return true, "remove the \"sccache\" input"
+		}
+		if v, ok := a.input("cache"); ok && strings.EqualFold(strings.TrimSpace(v), "sccache") {
+			return true, "remove the \"cache\" input"
+		}
+		return false, ""
+	}},
+	{"mozilla-actions/sccache-action", func(a *ExecAction, u *UsesRef) (bool, string) {
+		// the action only installs sccache; cacheEnvSwitch says what makes sccache use the GitHub Actions cache
+		return true, "do not set SCCACHE_GHA_ENABLED"
+	}},
 	{"awalsh128/cache-apt-pkgs-action", func(a *ExecAction, u *UsesRef) (bool, string) {
 		return true, "remove this step"
 	}},
@@ -204,6 +224,76 @@ var cacheActions = []cacheAction{
 	{"determinatesystems/magic-nix-cache-action", func(a *ExecAction, u *UsesRef) (bool, string) {
 		return true, "remove this step"
 	}},
+}
+
+// buildxMayDownload is the pedantic reading of docker/setup-buildx-action: without "version" the action downloads
+// buildx, and restores it from the cache, only on a runner that has none. The runners of GitHub have it, a
+// self-hosted runner may not, and the rule does not know which one the job runs on.
+func buildxMayDownload(a *ExecAction, u *UsesRef) (bool, string) {
+	if v, ok := a.input("cache-binary"); ok && isFalseLiteral(v) {
+		return false, ""
+	}
+	if major, ok := majorOf(u); ok && major < 3 {
+		return false, ""
+	}
+	return true, "set \"cache-binary: false\""
+}
+
+// cacheEnvSwitch lists the actions which restore a cache only when an environment variable says so (of the step, the
+// job or the workflow, or written to GITHUB_ENV by a script of the job): sccache uses the GitHub Actions cache when
+// SCCACHE_GHA_ENABLED is true, and without it the action only installs the binary. A value of false switches it off;
+// a value that is not known (an expression) keeps the finding, as does a script of the job that mentions the
+// variable.
+var cacheEnvSwitch = map[string]string{
+	"mozilla-actions/sccache-action": "SCCACHE_GHA_ENABLED",
+}
+
+// envVarState tells what the environment says about the variable: whether it sets it, and if so whether the value
+// is a false one.
+func envVarState(e *Env, name string) (set, on bool) {
+	if e == nil {
+		return false, false
+	}
+	for _, v := range e.Vars {
+		if v == nil || v.Name == nil || !strings.EqualFold(v.Name.Value, name) {
+			continue
+		}
+		val := ""
+		if v.Value != nil {
+			val = strings.TrimSpace(v.Value.Value)
+		}
+		return true, val != "" && !isFalseLiteral(val) && val != "0"
+	}
+	return false, false
+}
+
+// Invariants of the checks of this file that were added for the findings of zizmor. A new case is reported only when
+// it is certain (no finding when unsure): the environment of a step is resolved by precedence (step, job, workflow; see
+// cacheEnvOn), a condition is evaluated for the runs that publish with gateAllowsRun and the scenarios of the rule
+// (feedsPublishingJob uses it for the upload and for the jobs that need it), and the version of an action pinned to a
+// commit is the one of its comment (withCommentVersion) in every check.
+
+// cacheEnvOn reports whether the variable that switches the cache of an action on is set for the step. The most
+// specific value decides, as it does for the runner: the env of the step, then the env of the job, then the env of the
+// workflow. A script of the job that mentions the variable (it writes it to GITHUB_ENV) keeps the finding unless the
+// step sets it. In a composite action the variable may come from the workflow that calls it, which is not known
+// here, so the finding stays unless the step switches it off.
+func (rule *RuleCachePoisoning) cacheEnvOn(j *Job, s *Step, name string) bool {
+	if set, on := envVarState(s.Env, name); set {
+		return on
+	}
+	for _, st := range flattenSteps(j.Steps) {
+		if r, ok := st.Exec.(*ExecRun); ok && r.Run != nil && strings.Contains(r.Run.Value, name) {
+			return true
+		}
+	}
+	if set, on := envVarState(j.Env, name); set {
+		return on
+	}
+	if set, on := envVarState(rule.wf.Env, name); set {
+		return on
+	}
+	return rule.wf.Action != nil // the caller may set it, which is not known: the finding stays
 }
 
 // automaticCaches are the actions that restore a cache without an input asking for one, when the repository is set
@@ -337,6 +427,13 @@ var publishingActions = []string{
 	"nwtgck/actions-netlify",
 	"r0adkll/upload-google-play",
 	"apple-actions/upload-testflight-build",
+	"jreleaser/release-action",
+	"release-drafter/release-drafter",
+	"aws-actions/aws-cloudformation-github-deploy",
+	"azure/aci-deploy",
+	"azure/container-apps-deploy-action",
+	"azure/sql-action",
+	"google-github-actions/deploy-cloud-functions",
 }
 
 // publishCommandRegex matches a command of a `run:` script that publishes a release or a package.
@@ -356,6 +453,7 @@ type RuleCachePoisoning struct {
 	tagOnly    bool   // the workflow is a release workflow only because it runs on pushed tags or release branches (no release event)
 	releaseWhy string // why the workflow is a release workflow, or ""
 	privileged string // the privileged trigger of the workflow, or ""
+	loose      bool   // the pedantic checks run: the heuristics of zizmor for what is a release
 	// scenarios are the runs of a release workflow that publish; eventScenarios one run per event of the workflow,
 	// for a job that publishes in a workflow which is not triggered by a release
 	scenarios, eventScenarios []triggerScenario
@@ -373,7 +471,7 @@ func NewRuleCachePoisoning() *RuleCachePoisoning {
 
 // releaseTrigger tells how the events publish a release ("runs on the release event" or "runs on
 // pushed tags"), or returns "" when they do not. scenarios are the runs of the events that publish.
-func releaseTrigger(events []Event) (why string, scenarios []triggerScenario) {
+func releaseTrigger(events []Event, loose bool) (why string, scenarios []triggerScenario) {
 	for _, e := range events {
 		ev, ok := e.(*WebhookEvent)
 		if !ok {
@@ -387,9 +485,9 @@ func releaseTrigger(events []Event) (why string, scenarios []triggerScenario) {
 			if why == "" {
 				why = "runs on pushed tags"
 			}
-			scenarios = append(scenarios, scenarioTagPush)
+			scenarios = append(scenarios, tagPushScenarios(ev.Tags)...)
 		}
-		if e.EventName() == "push" && releaseBranchFilter(ev.Branches) {
+		if e.EventName() == "push" && (releaseBranchFilter(ev.Branches) || loose && namesReleaseBranch(ev.Branches)) {
 			if why == "" {
 				why = "runs on pushes to release branches"
 			}
@@ -425,6 +523,26 @@ func releaseBranchFilter(f *WebhookEventFilter) bool {
 		positive++
 	}
 	return positive > 0
+}
+
+// namesReleaseBranch reports whether a `branches` filter has a positive pattern that names a release branch,
+// whatever else it lists (`branches: [main, 'release/**']`). zizmor takes that for a release trigger, which it is when a
+// release is made from the branch and not when it is the filter of the ordinary checks, so the rule asks for it
+// with the option pedantic only.
+func namesReleaseBranch(f *WebhookEventFilter) bool {
+	if f.IsEmpty() {
+		return false
+	}
+	for _, v := range f.Values {
+		if v == nil {
+			continue
+		}
+		pat := strings.ToLower(strings.TrimSpace(v.Value))
+		if !strings.HasPrefix(pat, "!") && strings.Contains(pat, "release") {
+			return true
+		}
+	}
+	return false
 }
 
 // tagFilterMatches reports whether the `tags` filter of a push event lets a pushed tag through. A filter of
@@ -465,7 +583,7 @@ func eventScenarios(events []Event) []triggerScenario {
 			ret = append(ret, triggerScenario{"event_name": "push", refPrefixKey: "refs/heads/"})
 		}
 		if !branchFilter && !tagFilter || tagFilter && (ev.Tags == nil || tagFilterMatches(ev.Tags)) {
-			ret = append(ret, scenarioTagPush)
+			ret = append(ret, tagPushScenarios(ev.Tags)...)
 		}
 	}
 	return ret
@@ -476,13 +594,14 @@ func (rule *RuleCachePoisoning) VisitWorkflowPre(n *Workflow) error {
 	rule.wf = n
 	rule.releaseWhy, rule.privileged, rule.tagOnly = "", "", false
 	rule.scenarios, rule.eventScenarios = nil, nil
+	rule.loose = rule.pedantic("cache-poisoning")
 	for _, e := range n.On {
 		if name := e.EventName(); slices.Contains(privilegedTriggers, name) && rule.privileged == "" {
 			rule.privileged = name
 		}
 	}
 	if n.Action == nil {
-		if why, sc := releaseTrigger(n.On); why != "" {
+		if why, sc := releaseTrigger(n.On, rule.loose); why != "" {
 			rule.releaseWhy, rule.scenarios = "the workflow "+why, sc
 			rule.tagOnly = !slices.ContainsFunc(sc, func(s triggerScenario) bool { return s["event_name"] == "release" })
 		}
@@ -491,7 +610,7 @@ func (rule *RuleCachePoisoning) VisitWorkflowPre(n *Workflow) error {
 		// The action runs in the context of the workflow which calls it. A caller which releases is enough:
 		// a cache restored there ends up in the published artifacts.
 		for _, cl := range c.Callers {
-			if why, sc := releaseTrigger(cl.Events); why != "" {
+			if why, sc := releaseTrigger(cl.Events, rule.loose); why != "" {
 				if rule.releaseWhy == "" {
 					rule.releaseWhy = fmt.Sprintf("%s %s and calls this action", cl.describe(), why)
 				}
@@ -550,6 +669,282 @@ func (rule *RuleCachePoisoning) cannotPublish(j *Job) bool {
 		}
 	}
 	return true
+}
+
+// publishScopes are the permissions with which a job can publish something: it can write to the repository (a release,
+// a tag), push a package, sign an attestation, deploy pages or a deployment, or ask for an OIDC token (trusted
+// publishing). Writing issues, pull requests or checks is not publishing.
+var publishScopes = []string{"contents", "packages", "attestations", "pages", "deployments", "id-token"}
+
+// canPublish reports whether a job can publish: it has an environment (what deployments are guarded with), grants a
+// write permission of publishScopes (the job's own, or the workflow's when it has none), or runs a publishing action or
+// command. A secret alone does not count here, a job that notifies a chat uses one.
+func (rule *RuleCachePoisoning) canPublish(j *Job) bool {
+	if j.Environment != nil || publishingReason(flattenSteps(j.Steps)) != "" {
+		return true
+	}
+	p := j.Permissions
+	if p == nil {
+		p = rule.wf.Permissions
+	}
+	if p == nil {
+		return false
+	}
+	if p.All != nil {
+		return strings.EqualFold(strings.TrimSpace(p.All.Value), "write-all")
+	}
+	for _, sc := range p.Scopes {
+		if sc != nil && sc.Name != nil && sc.Value != nil && strings.EqualFold(strings.TrimSpace(sc.Value.Value), "write") &&
+			slices.Contains(publishScopes, strings.ToLower(strings.TrimSpace(sc.Name.Value))) {
+			return true
+		}
+	}
+	return false
+}
+
+// uploadsArtifact reports whether the job uploads an artifact in the runs that publish: it hands files to the jobs
+// that need it. An upload with an `if:` that keeps those runs away does not.
+func uploadsArtifact(j *Job, scenarios []triggerScenario) bool {
+	return slices.ContainsFunc(flattenSteps(j.Steps), func(s *Step) bool {
+		a, ref := stepAction(s)
+		return a != nil && ref.Kind == UsesAction && strings.HasPrefix(ref.CanonicalName(), "actions/upload-artifact") &&
+			(s.If == nil || gateAllowsRun(s.If.Value, scenarios))
+	})
+}
+
+// feedsPublishingJob reports whether the job j hands artifacts to a job that can publish: j uploads an artifact and
+// a job that can publish depends on it, directly or through other jobs (`needs`). Then j is not only a check that
+// the permissions leave without a way to publish: the files that it builds are what the other job publishes, so a
+// poisoned cache in j ends up in the release. A job that only has to pass before the release (a test job) does not
+// hand over anything, and is not reported.
+func (rule *RuleCachePoisoning) feedsPublishingJob(j *Job, scenarios []triggerScenario) bool {
+	if j.ID == nil || rule.wf == nil || !uploadsArtifact(j, scenarios) {
+		return false
+	}
+	// Invariant. Every job has a set of possible results among success, failure, cancelled and skipped. The set of j
+	// is the three that ran. The set of any other job comes from its `if:` evaluated over the sets of ITS needs
+	// (recursively, memoised): {skipped} when the condition is false for every choice of their results, the three that
+	// ran when it is true for every choice, all four when it is open (or the job is not known). One evaluation of a
+	// condition uses ONE choice of the results of the needed jobs, from which success(), failure(), cancelled() and
+	// needs.<job>.result all follow. A publisher counts when its condition is not false for some choice (unknown means
+	// possibly publishing); a condition that is false whatever the results are is settled first, and past a bound on
+	// the choices the job counts as possibly running.
+	root := strings.ToLower(j.ID.Value)
+	jobs := map[string]*Job{}
+	var ids []string
+	for id, dep := range rule.wf.Jobs {
+		if dep != nil && strings.ToLower(id) != root {
+			jobs[strings.ToLower(id)] = dep
+			ids = append(ids, strings.ToLower(id))
+		}
+	}
+	slices.Sort(ids)
+	needsOf := func(dep *Job) (ret []string) {
+		for _, n := range dep.Needs {
+			if n != nil {
+				ret = append(ret, strings.ToLower(n.Value))
+			}
+		}
+		return ret
+	}
+	reach := map[string]bool{root: true}
+	for grew := true; grew; {
+		grew = false
+		for _, id := range ids {
+			if !reach[id] && slices.ContainsFunc(needsOf(jobs[id]), func(n string) bool { return reach[n] }) {
+				reach[id], grew = true, true
+			}
+		}
+	}
+	all := []string{"success", "failure", "cancelled", "skipped"}
+	ran := all[:3]
+	memo := map[string][]string{root: ran}
+	var results func(id string) []string
+	results = func(id string) []string {
+		if r, ok := memo[id]; ok {
+			return r
+		}
+		memo[id] = all // a cycle, while it is worked out
+		job := jobs[id]
+		if job == nil {
+			return all
+		}
+		sets := map[string][]string{}
+		for _, n := range needsOf(job) {
+			sets[n] = results(n)
+		}
+		canRun, canSkip := runsWithNeeds(jobIf(job), scenarios, sets)
+		switch {
+		case !canRun:
+			memo[id] = []string{"skipped"}
+		case !canSkip:
+			memo[id] = ran
+		}
+		return memo[id]
+	}
+	for _, id := range ids {
+		if reach[id] && rule.canPublish(jobs[id]) {
+			if canRun, _ := runsWithNeeds(jobIf(jobs[id]), scenarios, setsOf(needsOf(jobs[id]), results)); canRun {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func jobIf(j *Job) string {
+	if j.If != nil {
+		return j.If.Value
+	}
+	return ""
+}
+
+func setsOf(needs []string, results func(string) []string) map[string][]string {
+	sets := map[string][]string{}
+	for _, n := range needs {
+		sets[n] = results(n)
+	}
+	return sets
+}
+
+// runsWithNeeds evaluates the condition of a job (empty for none) over the possible results of the jobs that it needs
+// (see the invariant in feedsPublishingJob) and tells whether the job can run and whether it can be skipped. Without a
+// status function success() is added to the condition. The needed jobs that the condition names (needs.<job>.result)
+// are tried one by one; the others only matter through success(), failure() and cancelled(), which they can each
+// make true or false.
+func runsWithNeeds(cond string, scenarios []triggerScenario, sets map[string][]string) (canRun, canSkip bool) {
+	var e ExprNode
+	if cond != "" {
+		if e = parseGateExpression(cond); e == nil {
+			return true, true
+		}
+	}
+	hasStatus := e != nil && exprCallsStatus(e)
+	var named []string
+	if e != nil {
+		named = namedNeedResults(e)
+	}
+	var tried, rest []string
+	for n := range sets {
+		if slices.Contains(named, n) {
+			tried = append(tried, n)
+		} else {
+			rest = append(rest, n)
+		}
+	}
+	slices.Sort(tried)
+	has := func(n, r string) bool { return slices.Contains(sets[n], r) }
+	canFail, canCancel, allSucceed, anyOther := false, false, true, false
+	for _, n := range rest {
+		canFail, canCancel = canFail || has(n, "failure"), canCancel || has(n, "cancelled")
+		allSucceed = allSucceed && has(n, "success")
+		anyOther = anyOther || has(n, "failure") || has(n, "cancelled") || has(n, "skipped")
+	}
+	// the choices for the jobs that are not named: success() (all succeeded, or not), failure() and cancelled()
+	type flags struct{ success, failure, cancelled bool }
+	var restChoices []flags
+	// one needed job can fail while another is cancelled, so both can be true when two different jobs can do each
+	both := false
+	for _, a := range rest {
+		for _, b := range rest {
+			both = both || a != b && has(a, "failure") && has(b, "cancelled")
+		}
+	}
+	for _, f := range []flags{{true, false, false}, {false, false, false}, {false, true, false}, {false, false, true}, {false, true, true}} {
+		if f.success && !allSucceed || f.failure && !canFail || f.cancelled && !canCancel || f.failure && f.cancelled && !both || !f.success && !f.failure && !f.cancelled && !anyOther {
+			continue
+		}
+		restChoices = append(restChoices, f)
+	}
+	if len(restChoices) == 0 {
+		return true, true
+	}
+	const maxChoices = 1 << 14
+	choices := len(restChoices)
+	for _, n := range tried {
+		if choices *= len(sets[n]); choices > maxChoices {
+			choices = -1
+			break
+		}
+	}
+	for _, sc := range scenarios {
+		// a condition that is false whatever the results are is settled first, with them left unknown
+		cp := triggerScenario{"status.success": "?", "status.failure": "?", "status.cancelled": "?"}
+		for k, v := range sc {
+			cp[k] = v
+		}
+		if e != nil && evalGate(e, cp).truth() == triFalse {
+			canSkip = true
+			continue
+		}
+		if choices < 0 {
+			return true, true
+		}
+		combos := choices / len(restChoices)
+		for c := 0; c < combos; c++ {
+			for _, rc := range restChoices {
+				cp := triggerScenario{}
+				for k, v := range sc {
+					cp[k] = v
+				}
+				success, failed, cancelled := rc.success, rc.failure, rc.cancelled
+				left := c
+				for _, n := range tried {
+					res := sets[n][left%len(sets[n])]
+					left /= len(sets[n])
+					cp["needs."+n+".result"] = res
+					success, failed, cancelled = success && res == "success", failed || res == "failure", cancelled || res == "cancelled"
+				}
+				cp["status.success"], cp["status.failure"], cp["status.cancelled"] = strconv.FormatBool(success), strconv.FormatBool(failed), strconv.FormatBool(cancelled)
+				v := triTrue
+				if e != nil {
+					v = evalGate(e, cp).truth()
+				}
+				if !hasStatus && !success {
+					v = triFalse
+				}
+				canRun, canSkip = canRun || v != triFalse, canSkip || v != triTrue
+				if canRun && canSkip {
+					return true, true
+				}
+			}
+		}
+	}
+	return canRun, canSkip
+}
+
+// namedNeedResults lists the jobs whose result the expression reads (needs.<job>.result), in lower case.
+func namedNeedResults(e ExprNode) []string {
+	var ret []string
+	VisitExprNode(e, func(n, _ ExprNode, entering bool) {
+		d, ok := n.(*ObjectDerefNode)
+		if !ok || !entering || d.Property != "result" {
+			return
+		}
+		if r, ok := d.Receiver.(*ObjectDerefNode); ok {
+			if v, ok := r.Receiver.(*VariableNode); ok && v.Name == "needs" {
+				if name := strings.ToLower(r.Property); !slices.Contains(ret, name) {
+					ret = append(ret, name)
+				}
+			}
+		}
+	})
+	return ret
+}
+
+// exprCallsStatus reports whether the expression calls success(), failure(), cancelled() or always(), which
+// stops GitHub from adding success() to the condition of a job.
+func exprCallsStatus(e ExprNode) bool {
+	found := false
+	VisitExprNode(e, func(n, _ ExprNode, entering bool) {
+		if f, ok := n.(*FuncCallNode); ok && entering {
+			switch strings.ToLower(f.Callee) {
+			case "success", "failure", "cancelled", "always":
+				found = true
+			}
+		}
+	})
+	return found
 }
 
 // secretRefRe finds a read of a secret: secrets.NAME (group 1), secrets['NAME'] (group 2), or any other form
@@ -625,7 +1020,7 @@ func (rule *RuleCachePoisoning) VisitJobPre(n *Job) error {
 
 	steps := flattenSteps(n.Steps)
 	why, scenarios := rule.releaseWhy, rule.scenarios
-	if why != "" && rule.tagOnly && rule.cannotPublish(n) {
+	if why != "" && rule.tagOnly && !rule.loose && rule.cannotPublish(n) && !rule.feedsPublishingJob(n, scenarios) {
 		why = "" // a tag only starts a check here, see cannotPublish
 	}
 	if why == "" {
@@ -654,7 +1049,13 @@ func (rule *RuleCachePoisoning) VisitJobPre(n *Job) error {
 			}
 			reads, hint = auto(a, withCommentVersion(rule.wf, a, ref), root)
 		}
+		if !reads && rule.loose && name == "docker/setup-buildx-action" {
+			reads, hint = buildxMayDownload(a, withCommentVersion(rule.wf, a, ref))
+		}
 		if !reads || !cacheCanRunOnReleaseTrigger(n, s, a, name, scenarios) || rule.callersTurnCacheOff(a, name) {
+			continue
+		}
+		if v := cacheEnvSwitch[name]; v != "" && !rule.cacheEnvOn(n, s, v) {
 			continue
 		}
 		rule.ReportIDf(
@@ -679,7 +1080,7 @@ func (rule *RuleCachePoisoning) callersTurnCacheOff(a *ExecAction, name string) 
 	}
 	for _, g := range cacheGateInputs[name] {
 		v, ok := a.input(g.input)
-		if !ok {
+		if !ok || gateInputIsRedundant(name, a, g.input, nil) {
 			continue
 		}
 		m := inputRefRe.FindStringSubmatch(strings.TrimSpace(v))
@@ -728,7 +1129,7 @@ func (rule *RuleCachePoisoning) everyReleaseCallerSets(input string, offWhenTrue
 	}
 	releasing := 0
 	for _, cl := range rule.wf.Action.Callers.Callers {
-		why, scenarios := releaseTrigger(cl.Events)
+		why, scenarios := releaseTrigger(cl.Events, rule.loose)
 		if why == "" {
 			continue
 		}
@@ -805,6 +1206,8 @@ var cacheGateInputs = map[string][]cacheGate{
 	"docker/build-push-action": {{input: "cache-from"}},
 	// the next ones have no switch: only the "if:" of the step can gate them (actions/cache has "lookup-only",
 	// which `reads` handles as a literal)
+	"pyo3/maturin-action":                       {{input: "sccache"}},
+	"mozilla-actions/sccache-action":            nil,
 	"actions/cache":                             nil,
 	"actions/cache/restore":                     nil,
 	"hendrikmuhs/ccache-action":                 nil,
@@ -829,10 +1232,8 @@ func publishingReason(steps []*Step) string {
 			if u.Kind == UsesAction && slices.ContainsFunc(publishingActions, func(p string) bool { return name == p || strings.HasPrefix(name, p+"/") }) {
 				return "the job publishes with " + name
 			}
-			if u.Kind == UsesAction && name == "docker/build-push-action" {
-				if v, _ := e.input("push"); isTrueLiteral(v) {
-					return "the job pushes an image"
-				}
+			if u.Kind == UsesAction && name == "docker/build-push-action" && buildPushPushes(e) {
+				return "the job pushes an image"
 			}
 		case *ExecRun:
 			if e.Run != nil {
@@ -845,9 +1246,53 @@ func publishingReason(steps []*Step) string {
 	return ""
 }
 
+// buildPushPushes reports whether a use of docker/build-push-action may push the image. A non-empty "outputs" is what
+// buildx receives, and the shorthand "push" is not applied to it, so "outputs" decides alone when it is set: it pushes
+// with "type=registry" or "push=true" (as in "type=image,push-by-digest=true,push=true"), and "push: false" does not
+// cancel that, nor does "push: true" make a local export push. Without "outputs", "push" decides: anything but a false
+// value pushes (an expression such as "${{ inputs.push }}" is not known to be false), and the default is false.
+func buildPushPushes(a *ExecAction) bool {
+	if out, _ := a.input("outputs"); strings.TrimSpace(out) != "" {
+		return buildOutputPushRe.MatchString(out) || buildOutputMayChange(out)
+	}
+	v, _ := a.input("push")
+	v = strings.TrimSpace(v)
+	return v != "" && !isFalseLiteral(v)
+}
+
+// outputExprRe finds an expression in the outputs of a build.
+// It spans lines, as an expression in a block scalar may.
+var outputExprRe = regexp.MustCompile(`(?s)\$\{\{.*?\}\}`)
+
+// buildOutputMayChange reports whether an expression in "outputs" can change what the output does: it is the whole
+// field, or in a key, or in the value of "type" or "push" (it may resolve to the registry, or to nothing, and then
+// "push" applies). An expression in another value, as in "type=local,dest=${{ runner.temp }}", only supplies a path
+// or a name.
+func buildOutputMayChange(out string) bool {
+	if !strings.Contains(out, "${{") {
+		return false
+	}
+	out = outputExprRe.ReplaceAllString(out, "\x00")
+	for _, f := range strings.FieldsFunc(out, func(r rune) bool { return r == ',' || r == '\n' }) {
+		f = strings.Trim(strings.TrimSpace(f), `"'`)
+		if !strings.Contains(f, "\x00") {
+			continue
+		}
+		key, val, ok := strings.Cut(f, "=")
+		key = strings.ToLower(strings.TrimSpace(key))
+		if !ok || strings.Contains(key, "\x00") || (key == "type" || key == "push") && strings.Contains(val, "\x00") {
+			return true
+		}
+	}
+	return false
+}
+
+// buildOutputPushRe finds the options of the "outputs" of docker/build-push-action which push the image.
+var buildOutputPushRe = regexp.MustCompile(`(?i)(?:^|[\s,"'])(?:type=registry|push=true)(?:[\s,"']|$)`)
+
 func init() {
 	registerRules(
-		RuleInfo{ID: "cache-poisoning", Group: RuleGroupSecurity, Summary: "A cache is restored in a release job or written by a privileged trigger.", DefaultLevel: SeverityError, Profile: ProfileDefault, DocsAnchor: "check-cache-poisoning"},
+		RuleInfo{ID: "cache-poisoning", Group: RuleGroupSecurity, Summary: "A cache is restored in a release job or written by a privileged trigger. With the option pedantic, a tag that only starts checks and a branch filter that names a release branch among others count as releases too.", DefaultLevel: SeverityError, Profile: ProfileDefault, DocsAnchor: "check-cache-poisoning", Options: []RuleOption{pedanticOption}},
 	)
 	registerRuleFactory("cache-poisoning", func(env *RuleEnv) []Rule {
 		r := NewRuleCachePoisoning()
