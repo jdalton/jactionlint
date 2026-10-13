@@ -73,6 +73,9 @@ type RuleGitHubEnv struct {
 	// multilineOnly makes an input that is one line (a title, a branch name) an ordinary value: the output-clobbering
 	// rule is about a line break in the value.
 	multilineOnly bool
+	// freeTextOnly makes the name of a branch, of a label or of an account an ordinary value: the argument-injection rule
+	// is about text that a person types.
+	freeTextOnly bool
 	// checkouts caches, for the earlier steps of the job, whether the script checks out a pull request.
 	checkouts map[*Step]bool
 }
@@ -323,7 +326,7 @@ func (rule *RuleGitHubEnv) judgeWord(s *runscript.Script, w *runscript.Word, dep
 	}
 	// the output of `gh pr view --json title` and of `git log --format=%s` is text of outsiders
 	for _, c := range subs {
-		if src, ok := rule.scriptTaint(s, c); ok && (!rule.multilineOnly || src.multiline()) && !(src.nameOnly() && rule.dest == "GITHUB_ENV") {
+		if src, ok := rule.scriptTaint(s, c); ok && (!rule.multilineOnly || src.multiline()) && !((src.nameOnly() && rule.dest == "GITHUB_ENV") || (src.refOrLoginOnly() && rule.freeTextOnly)) {
 			// the name of a branch or of an account is one line: it cannot add a variable to the environment
 			return data{kind: dataUntrusted, input: src.desc, cmd: true, multiline: src.multiline()}
 		}
@@ -387,6 +390,9 @@ func (rule *RuleGitHubEnv) judgeExpr(e string) data {
 	}
 	// only an untrusted value is asked whether it can hold a line break
 	if rule.multilineOnly && d.kind == dataUntrusted && !exprMayHaveNewline(e) {
+		return data{}
+	}
+	if rule.freeTextOnly && d.kind == dataUntrusted && exprIsName(e) {
 		return data{}
 	}
 	return d

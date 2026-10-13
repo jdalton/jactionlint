@@ -46,6 +46,7 @@ List of checks:
 - [Dangerous writes to `GITHUB_ENV` and `GITHUB_PATH`](#check-github-env)
 - [Input of an outsider that a script runs as code (pedantic)](#check-command-injection)
 - [Input of an outsider that adds records to `GITHUB_OUTPUT` (pedantic)](#check-output-clobbering)
+- [Free text of an outsider in the program or the options of a command (pedantic)](#check-argument-injection)
 - [Writes to the environment files that lose data](#check-environment-file-redirect)
 - [Packages installed by name](#check-adhoc-packages)
 - [Tools installed without an exact version](#check-unpinned-tools)
@@ -3174,9 +3175,11 @@ A script can also read the text of an outsider itself, and the rule follows it f
 [command-injection](#check-command-injection) and [output-clobbering](#check-output-clobbering) as well):
 
 - `gh pr view` and `gh issue view` with a `--json` field that holds free text (`title`, `body`, `comments`, `headRefName`, `files`,
-  `author`, `reviews`, `commits`), `TITLE=$(gh pr view "$N" --json title --jq .title)`; a filter that reads none of them
-  (`--json title,number --jq .number`) clears it. Also `gh api repos/.../pulls` and `.../issues` (and their `comments`, `reviews`, `files`
-  and `commits`), with no filter or with a `--jq` filter that selects `.title`, `.body`, `.head.ref`, `.user.login`, `.filename` and the like.
+  `author`, `reviews`, `commits`), `TITLE=$(gh pr view "$N" --json title --jq .title)`. Also `gh api repos/.../pulls` and `.../issues` (and their
+  `comments`, `reviews`, `files` and `commits`). Without a `--jq` filter `gh` prints compact JSON, where a line break of a text is written `\n`, so the
+  text counts as one line. A filter prints a string as it is, with its line breaks: a filter that names a property (`.title`, `.body`,
+  `.comments[].body`, `.head.ref`) counts for what it names, and a filter that is not known (`.`, `.comments`, a variable) counts for what the
+  command can print. Only a filter that provably prints a number, a state, a date or a count (`.number`, `.state`, `.comments | length`) clears it.
 - `git log` and `git show` with a format that prints the subject, the body or the author (`%s`, `%b`, `%B`, `%an`, `%ae`, `--oneline`),
   `git diff` and `git diff-tree`, `git branch --show-current`, `git rev-parse --abbrev-ref` and `git symbolic-ref --short`, **once the
   pull request is checked out**: an earlier step of the job runs `actions/checkout` with a `ref` that names its head, or `gh pr checkout`, or a
@@ -3384,6 +3387,69 @@ The rule accepts a delimiter taken from `uuidgen`, `openssl rand`, `/dev/urandom
 
 To turn the rule off, put `output-clobbering: off` in the `rules` section of the [configuration file](config.md) or write
 `# jactionlint ignore=output-clobbering` after a reason.
+
+<a id="check-argument-injection"></a>
+## Free text of an outsider in the program or the options of a command (pedantic)
+
+Example input:
+
+```yaml
+on:
+  issue_comment:
+    types: [created]
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - run: sed "s/PLACEHOLDER/$BODY/g" template.txt > out.txt
+        env:
+          BODY: ${{ github.event.comment.body }}
+```
+
+Output:
+<!-- Skip update output -->
+```
+test.yaml:8:14: warning: free text of an outsider from the variable BODY (github.event.comment.body) is expanded into the program of sed: a value with a slash ends the command and the rest is a program of its own. GNU sed runs commands with `e` (`a/g;1e id;#`) and writes files with `w`. keep the value out of the program text: read it from the environment in awk (ENVIRON["BODY"]) or perl ($ENV{BODY}), or cut it down to letters and digits first [argument-injection]
+  |
+8 |       - run: sed "s/PLACEHOLDER/$BODY/g" template.txt > out.txt
+  |              ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+```
+
+<!-- Skip playground link -->
+
+The output above is from this `rules` section of the [configuration file](config.md):
+
+```yaml
+rules:
+  argument-injection: warn
+```
+
+Passing the input through `env:` makes `"$BODY"` safe as an argument, but not as part of the program that a command reads. In
+`sed "s/PLACEHOLDER/$BODY/g"` a slash in the value ends the `s` command and the rest is a program of its own: GNU sed runs a
+command with the `e` command and the `e` flag (`a/g;1e id;#`) and writes files with `w`. The program of `awk` can call `system()`.
+`find -exec $BODY` runs the value, an unquoted value in `find` is split into words that can add `-exec`, and a quoted value in the place of a
+predicate (`find . "$BODY"`, after the first path or after a predicate) is read as a predicate when it starts with a dash (`-delete`, `-exec`).
+The first path, the operands of the predicates (`-name "$TITLE"`) and the arguments of the command of `-exec` are not such places. For `wget`, `curl` and
+`git clone` a value that starts a word and starts with a dash is an option: `-o`, `--output`, `--upload-pack`. See CodeQL's [argument injection query](https://github.com/github/codeql/blob/main/actions/ql/src/experimental/Security/CWE-088/ArgumentInjectionCritical.ql)
+and [its commands](https://github.com/github/codeql/blob/main/actions/ql/lib/ext/config/argument_injection_sinks.yml).
+
+The rule `argument-injection` (in the `pedantic` profile) reports free text that an outsider types (a body, a comment, a title,
+a commit message, the name of an author, and what a script reads with `gh pr view` and `git log`, see [`github-env`](#check-github-env))
+when it is expanded in one of these places. It leaves out the name of a branch, of a label and of an account, as CodeQL does: git does not
+accept a branch that starts with a dash, and the characters of an account name are fixed. A single quoted program (`sed 's/a/$BODY/'`)
+does not expand anything and is fine, and so are the value of `awk -v name="$BODY"`, a pattern (`find -name "$TITLE"`), a value after
+`--`, and a value in the middle of a word (`"dir/$BODY.tgz"`). For the options of `curl`, `wget` and `git clone` the word must be an operand (not the value of an option, such as `--branch "$BODY"`
+or `-d "$BODY"`, and not after `--`), and the value must be the environment variable as the step got it: a value that the script computed first
+is not followed. `tar`, `zip`, `unzip` and `rsync` are not covered, because the rule does not know their options well enough to tell an operand from the value of an option.
+
+The only safe shape of a value for a program is letters, digits, `_` and `-`: `tr -cd 'a-z0-9-'`, `${BODY//[^a-z0-9]/}`,
+`sed 's/[^a-z0-9-]//g'` or a check with an anchored pattern before the use. A dot and a slash are enough to break a sed program. An expression
+written in the script (`sed "s/a/${{ github.event.comment.body }}/"`) is a finding of [template-injection](#untrusted-inputs).
+`inputs.*` of a composite action is not judged. The rule does not know who may comment: a command that only maintainers can start is
+reported like any other.
+
+To turn the rule off, put `argument-injection: off` in the `rules` section of the [configuration file](config.md) or write
+`# jactionlint ignore=argument-injection` after a reason.
 
 <a id="check-environment-file-redirect"></a>
 ## Writes to the environment files that lose data
@@ -9210,7 +9276,7 @@ way because any caller can pass attacker-controlled text. jactionlint does not l
 
 How the rules treat actions:
 
-- **Applies** to the steps (and the metadata) of an action: `action-syntax`, `adhoc-packages`, `archived-uses`, `artipacked`, `background-step-not-waited`, `checkout-static-credentials`, `command-injection`, `conflicting-action-inputs`, `constant-condition`, `context-availability`, `continue-on-error`, `deprecated-action-input`, `deprecated-commands`, `duplicate-key`, `duplicate-step-id`, `environment-file-redirect`, `expired-ignore`, `expression-syntax`, `expression-type`, `fail-fast-action-inputs`, `forbidden-uses`, `github-app`, `if-always-true`, `impostor-commit`, `insecure-commands`, `insecure-ssh-keyscan`, `insecure-url-scheme`, `invalid-env-var-name`, `invalid-function-call`, `invalid-id`, `invalid-ignore-comment`, `invalid-local-action`, `invalid-parallel-step`, `invalid-shell-name`, `invalid-uses`, `invisible-characters`, `known-vulnerable-actions`, `malformed-expression-delimiters`, `max-run-lines`, `merge-key`, `misfeature`, `missing-action-input`, `multiline-plain-run`, `obfuscation`, `outdated-action-runner`, `output-clobbering`, `pipeline-without-pipefail`, `pyflakes`, `recursive-alias`, `ref-confusion`, `ref-version-mismatch`, `repojacking`, `require-expression-wrapping`, `self-repository`, `shellcheck`, `stale-action-refs`, `superfluous-actions`, `template-injection`, `typosquat-uses`, `undefined-function`, `undefined-property`, `unknown-action-input`, `unlocked-install`, `unpinned-images`, `unpinned-tools`, `unpinned-uses`, `unsound-contains`, `unsound-prefix-match`, `unsound-ternary`, `unused-anchor`, `unused-ignore`, `unverified-download`, `use-trusted-publishing`, `yaml-syntax`.
+- **Applies** to the steps (and the metadata) of an action: `action-syntax`, `adhoc-packages`, `archived-uses`, `argument-injection`, `artipacked`, `background-step-not-waited`, `checkout-static-credentials`, `command-injection`, `conflicting-action-inputs`, `constant-condition`, `context-availability`, `continue-on-error`, `deprecated-action-input`, `deprecated-commands`, `duplicate-key`, `duplicate-step-id`, `environment-file-redirect`, `expired-ignore`, `expression-syntax`, `expression-type`, `fail-fast-action-inputs`, `forbidden-uses`, `github-app`, `if-always-true`, `impostor-commit`, `insecure-commands`, `insecure-ssh-keyscan`, `insecure-url-scheme`, `invalid-env-var-name`, `invalid-function-call`, `invalid-id`, `invalid-ignore-comment`, `invalid-local-action`, `invalid-parallel-step`, `invalid-shell-name`, `invalid-uses`, `invisible-characters`, `known-vulnerable-actions`, `malformed-expression-delimiters`, `max-run-lines`, `merge-key`, `misfeature`, `missing-action-input`, `multiline-plain-run`, `obfuscation`, `outdated-action-runner`, `output-clobbering`, `pipeline-without-pipefail`, `pyflakes`, `recursive-alias`, `ref-confusion`, `ref-version-mismatch`, `repojacking`, `require-expression-wrapping`, `self-repository`, `shellcheck`, `stale-action-refs`, `superfluous-actions`, `template-injection`, `typosquat-uses`, `undefined-function`, `undefined-property`, `unknown-action-input`, `unlocked-install`, `unpinned-images`, `unpinned-tools`, `unpinned-uses`, `unsound-contains`, `unsound-prefix-match`, `unsound-ternary`, `unused-anchor`, `unused-ignore`, `unverified-download`, `use-trusted-publishing`, `yaml-syntax`.
 - **Caller-dependent**: `agentic-actions`, `bot-conditions`, `cache-poisoning`, `github-env` (its findings about untrusted input do not depend on the caller), `untrusted-artifact` and `untrusted-checkout`.
 - **Not applicable** because an action does not have what the rule checks, or because only the calling job can decide (`unused-baseline-entry` is about the baseline file, not about a workflow or an action): `anonymous-definition`, `concurrency-cancels-prs`, `concurrency-cancels-release`, `concurrency-limits`, `conflicting-runner-labels`, `cron-too-frequent`, `cyclic-job-needs`, `dangerous-triggers`, `dependabot-cooldown`, `dependabot-execution`, `dependabot-missing-actions-update`, `dependabot-syntax`, `deprecated-runner-label`, `duplicate-job-id`, `duplicate-job-needs`, `duplicate-triggers`, `event-name-never-received`, `excessive-permissions`, `gate-job-skipped-on-failure`, `gh-without-token`, `hardcoded-container-credentials`, `insufficient-permissions`, `invalid-activity-type`, `invalid-cron`, `invalid-event-config`, `invalid-event-filter`, `invalid-glob`, `invalid-label-pattern`, `invalid-local-workflow`, `invalid-permissions`, `invalid-timezone`, `invalid-workflow-call`, `invalid-workflow-call-input`, `invalid-workflow-dispatch-input`, `local-action-checkout`, `matrix-duplicate-value`, `matrix-invalid-exclude`, `missing-permissions`, `missing-timeout`, `missing-workflow-input`, `missing-workflow-secret`, `mutable-runner-label`, `overprovisioned-secrets`, `require-shell`, `required-actions`, `secrets-inherit`, `secrets-outside-env`, `self-hosted-runner`, `timeout-too-long`, `ubuntu-slim-limits`, `undefined-job-needs`, `undocumented-permissions`, `unknown-event`, `unknown-runner-label`, `unknown-workflow-input`, `unknown-workflow-secret`, `unredacted-secrets`, `unused-baseline-entry`, `unused-job-output`, `unused-needs`, `unused-workflow-input`, `workflow-call-permissions`, `workflow-input-type`, `workflow-run-names`, `workflow-secret-scope`, `workflow-syntax`.
 
