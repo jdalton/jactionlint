@@ -930,6 +930,8 @@ jactionlint --online
 - **Offline.** `--online=cache` never uses the network: it answers from the cache whatever the age of the answers, and a lookup with
   nothing cached is skipped with one warning (run once with `--online` to fill the cache). `--online=cache,strict` fails on such a
   lookup. Good for a laptop on a plane or a sandboxed CI job that restores the cache directory.
+- **Immutable releases.** With the policy `immutable-release` of the `unpinned-uses` rule, `--online` accepts the tag of an immutable GitHub
+  release (`uses: astral-sh/setup-uv@v10.3.0`) like a commit SHA. See [tags of immutable releases](checks.md#check-immutable-release).
 - **Environments.** Three other rules use the online checks without being online rules: `untrusted-checkout`, `untrusted-artifact`
   and `agentic-actions` trust the `environment:` of a job ("its reviewers decide"), and with `--online` they look at the environment
   (`GET /repos/{owner}/{repo}/environments/{name}`, the repository from `GITHUB_REPOSITORY` or the `origin` remote) and report the job
