@@ -145,15 +145,21 @@ func (rule *RuleUnlockedInstall) scriptsDisabledByWorkflow(step *Step, tool, bef
 			return true
 		}
 	}
-	if rule.job != nil {
-		for _, st := range rule.job.Steps {
-			if st == step {
-				// in the script of the step itself only what runs before the install counts
-				return scriptSetsIgnoreScripts(before)
-			}
-			if r, ok := st.Exec.(*ExecRun); ok && r.Run != nil && scriptSetsIgnoreScripts(r.Run.Value) {
-				return true
-			}
+	return rule.jobScriptMatches(step, before, scriptSetsIgnoreScripts)
+}
+
+// jobScriptMatches reports whether the script of an earlier step of the job matches, or the part of the script of the
+// step itself that comes before the install (before): what a script does after the install does not change it.
+func (rule *RuleUnlockedInstall) jobScriptMatches(step *Step, before string, match func(string) bool) bool {
+	if rule.job == nil {
+		return false
+	}
+	for _, st := range rule.job.Steps {
+		if st == step {
+			return match(before)
+		}
+		if r, ok := st.Exec.(*ExecRun); ok && r.Run != nil && match(r.Run.Value) {
+			return true
 		}
 	}
 	return false
@@ -248,10 +254,10 @@ func (rule *RuleUnlockedInstall) yarnSkipsScripts(dir string, pkg packageJSON) b
 		}
 		// Yarn 2+ without the setting: the default is true up to Yarn 4.13 and false from 4.14 (Configuration.ts of
 		// the release tags), so only a version that package.json names can tell
-		major, minor, ok := pkg.yarnVersion()
+		major, minor, ok := pkg.managerVersion("yarn")
 		return ok && (major > 4 || major == 4 && minor >= 14)
 	}
-	if major, minor, ok := pkg.yarnVersion(); ok {
+	if major, minor, ok := pkg.managerVersion("yarn"); ok {
 		return major > 4 || major == 4 && minor >= 14
 	}
 	return false
