@@ -243,6 +243,7 @@
               "unused-job-output",
               "unused-needs",
               "unused-workflow-input",
+              "unused-workflow-secret",
               "unverified-download",
               "use-trusted-publishing",
               "workflow-call-permissions",
@@ -467,6 +468,7 @@
                   "unused-job-output",
                   "unused-needs",
                   "unused-workflow-input",
+                  "unused-workflow-secret",
                   "unverified-download",
                   "use-trusted-publishing",
                   "workflow-call-permissions",
@@ -622,6 +624,7 @@
                     "unused-job-output",
                     "unused-needs",
                     "unused-workflow-input",
+                    "unused-workflow-secret",
                     "unverified-download",
                     "use-trusted-publishing",
                     "workflow-call-permissions",
@@ -3314,7 +3317,7 @@
           ]
         },
         "secrets-outside-env": {
-          "description": "A job uses a secret but has no environment. Group: security. Profile: pedantic. Default level: warn. https://jactionlint.jdx.dev/rules#secrets-outside-env",
+          "description": "A job uses a secret but has no environment, or passes one to a reusable workflow. Group: security. Profile: pedantic. Default level: warn. https://jactionlint.jdx.dev/rules#secrets-outside-env",
           "oneOf": [
             {
               "$ref": "#/definitions/level"
@@ -4189,6 +4192,28 @@
             }
           ]
         },
+        "unused-workflow-secret": {
+          "description": "A secret of workflow_call is never used. Group: policy. Profile: pedantic. Default level: warn. https://jactionlint.jdx.dev/rules#unused-workflow-secret",
+          "oneOf": [
+            {
+              "$ref": "#/definitions/level"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "level": {
+                  "allOf": [
+                    {
+                      "$ref": "#/definitions/severity"
+                    }
+                  ],
+                  "description": "The level of the rule: error, warn, info or off."
+                }
+              },
+              "type": "object"
+            }
+          ]
+        },
         "unverified-download": {
           "description": "A script runs what it downloads without verifying it. Group: security. Profile: default. Default level: error. https://jactionlint.jdx.dev/rules#unverified-download",
           "oneOf": [
@@ -4311,7 +4336,7 @@
           ]
         },
         "workflow-secret-scope": {
-          "description": "A secret is assigned to the workflow-level env and reaches multiple jobs. Group: security. Profile: pedantic. Default level: warn. https://jactionlint.jdx.dev/rules#workflow-secret-scope",
+          "description": "A secret is assigned to the workflow-level env and reaches multiple jobs. With the option job-level, also one of the env of a job that reaches its steps. Group: security. Profile: pedantic. Default level: warn. https://jactionlint.jdx.dev/rules#workflow-secret-scope",
           "oneOf": [
             {
               "$ref": "#/definitions/level"
@@ -4319,6 +4344,11 @@
             {
               "additionalProperties": false,
               "properties": {
+                "job-level": {
+                  "default": false,
+                  "description": "Also report a secret assigned to the env of a job with two or more steps, which reaches those that do not set the variable themselves.",
+                  "type": "boolean"
+                },
                 "level": {
                   "allOf": [
                     {
