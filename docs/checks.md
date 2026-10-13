@@ -36,6 +36,7 @@ List of checks:
 - [CRON syntax and IANA timezone string at `on.schedule`](#check-cron-syntax-and-timezone)
 - [Runner labels](#check-runner-labels)
 - [Action format in `uses:`](#check-action-format)
+- [GitHub Actions lock file](#check-actions-lock)
 - [Local action inputs validation at `with:`](#check-local-action-inputs)
 - [Local action used before checkout](#check-local-action-checkout)
 - [Popular action inputs validation at `with:`](#check-popular-action-inputs)
@@ -2704,6 +2705,82 @@ lookup. It costs one request for each tag of the run that the policy leaves open
 answers), and one for the branch of the same name for each immutable one, which `ref-confusion` and `--fix` share. Nothing is asked for
 the repositories which another policy matches, or for a configuration without `immutable-release`. The setting protects the tag, not the
 author: an immutable release of a repository which was taken over later still runs what its author published.
+
+<a id="check-actions-lock"></a>
+### GitHub Actions lock file
+
+> [!WARNING]
+> The Actions lock file is a **technical preview** of GitHub and its format is pre-1.0 (`version: 'v0.0.3'` today). It may change without
+> notice. jactionlint reads only what is described below, ignores the keys it does not know, and does not trust a file of a version
+> whose shape it does not know, so a change of the format brings back findings and never hides one.
+
+A repository can lock the actions of its workflows with the [`gh actions-lock`](https://github.com/github/gh-actions-lock)
+extension of the GitHub CLI. It writes `.github/workflows/actions.lock`, which records for each workflow which actions it uses and, for
+every action, the commit it was resolved to (the format is defined in [github/actions-lockfile](https://github.com/github/actions-lockfile)).
+A workflow which is listed there keeps `uses: actions/checkout@v6.0.2` in its YAML, and the runner checks out the locked commit. That is
+the reason why the `unpinned-uses` rule does not report such a tag:
+
+```yaml
+version: 'v0.0.3'
+workflows:
+    '.github/workflows/ci.yml':
+        - 'actions/checkout@v6.0.2'
+dependencies:
+    'actions/checkout@v6.0.2':
+        ref: 'v6.0.2'
+        commit: 'sha1-de0fac2e4500dabe0009e67214ff5f5447ce83dd'
+        owner_id: 44036562
+        repo_id: 197814629
+```
+
+`unpinned-uses` accepts a step `uses: owner/repo@ref` (or `owner/repo/path@ref`, a sub action is locked by its repository) when the lock
+file of the repository, which is `.github/workflows/actions.lock` at its root:
+
+- lists the workflow being checked under `workflows`, and the list has `owner/repo@ref` with the same ref (the owner and the repository
+  are compared case-insensitively, the ref is not);
+- has a `dependencies` entry for that pin whose `ref` is the same ref and whose `commit` is a full digest (`sha1-` and 40 hex digits, or
+  `sha256-` and 64).
+
+This is how [CodeQL](https://github.com/github/codeql/pull/22155) reads the file for its `actions/unpinned-tag` query, and it does not
+check anything else about it: the commit is not looked up on GitHub, and the actions inside a locked composite action are not followed.
+The rule is unchanged when:
+
+- the repository has no lock file, it is not valid YAML, it has not the shape of the format, it has no `version` or the version is not
+  `v0.0.2` or `v0.0.3` (`v0.0.1` is not read), or a key is repeated (a workflow, a dependency, or a key of one): the official parser
+  rejects such a file, so neither the first nor the last entry is trusted;
+- the workflow is not listed in the file: workflows are onboarded to the lock file one by one, and only a listed workflow is held
+  to it (`gh actions-lock --verify` reports the others);
+- the entry of the action is missing or malformed (a ref which differs from the one of the pin, a `commit` which is not a digest);
+- the `uses:` is a reusable workflow call (`owner/repo/.github/workflows/x.yml@ref`) or a Docker image. The current
+  `gh actions-lock` does not record them (and CodeQL leaves reusable workflows alone), so they are judged as before. Some lock files
+  in the wild do list the pins of reusable workflows, which is not relied on.
+
+A step of a local action (`action.yml`) is read the way the lock file records it: the actions which a local action uses are
+listed under the workflows that run it with `uses: $/path` or `./path` (directly or through other local actions; a reusable
+workflow in between is a workflow of its own). Such a step is accepted when every workflow which runs the action is listed in the
+lock file and pins it. An action which no workflow of the repository runs is not locked, so its steps are reported.
+
+The fix of `unpinned-uses` under `--online`, which writes the commit SHA in `uses:`, is not offered for a step of a workflow which
+the lock file lists, because a ref with a SHA is another pin than the one of the lock file and can make the workflow fail the lock
+check. Add the entry with `gh actions-lock` instead. The fix is unchanged for reusable workflow calls and for the workflows which the
+lock file does not list.
+
+The option `actions-lock` of `unpinned-uses` turns this off, for a repository which wants every action pinned in the YAML whatever the
+lock file says:
+
+```yaml
+rules:
+  unpinned-uses:
+    level: error
+    actions-lock: false
+```
+
+Sources of the format, which this was written from (all of them public): the README of
+[`gh actions-lock`](https://github.com/github/gh-actions-lock), the schema and the Go parser in
+[`github/actions-lockfile`](https://github.com/github/actions-lockfile) (`schema/lockfile-v0.0.3.json`, `go/pkg/lockfile`), and the
+CodeQL pull requests [#22487](https://github.com/github/codeql/pull/22487) (extraction) and
+[#22155](https://github.com/github/codeql/pull/22155) (the query). zizmor tracks the same support in
+[zizmor#2371](https://github.com/zizmorcore/zizmor/issues/2371), not built yet.
 
 <a id="check-local-action-checkout"></a>
 ### Local action used before checkout
