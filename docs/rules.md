@@ -47,6 +47,7 @@ rules:
 | [command-injection](#command-injection) | security | warn | pedantic |
 | [concurrency-cancels-prs](#concurrency-cancels-prs) | correctness | error | default |
 | [concurrency-cancels-release](#concurrency-cancels-release) | correctness | error | default |
+| [concurrency-deadlock](#concurrency-deadlock) | correctness | error | correctness |
 | [concurrency-limits](#concurrency-limits) | policy | error | default |
 | [conflicting-action-inputs](#conflicting-action-inputs) | correctness | error | correctness |
 | [conflicting-runner-labels](#conflicting-runner-labels) | correctness | error | correctness |
@@ -315,6 +316,15 @@ cancel-in-progress can cancel a release or a deployment which is still running.
 - Profile: default
 - Fixable: yes
 - Details and examples: [checks](./checks.md#check-concurrency-cancels-release)
+
+## concurrency-deadlock
+
+The concurrency group of a workflow is the same as the group of a local reusable workflow it calls, so GitHub detects a deadlock and cancels the run.
+
+- Group: correctness
+- Default level: error
+- Profile: correctness
+- Details and examples: [checks](./checks.md#check-concurrency-deadlock)
 
 ## concurrency-limits
 

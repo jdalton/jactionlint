@@ -12,6 +12,7 @@ checkout-static-credentials default security error
 command-injection pedantic security warn
 concurrency-cancels-prs default correctness error
 concurrency-cancels-release default correctness error
+concurrency-deadlock correctness correctness error
 concurrency-limits default policy error
 conflicting-action-inputs correctness correctness error
 conflicting-runner-labels correctness correctness error

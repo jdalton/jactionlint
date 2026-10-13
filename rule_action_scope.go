@@ -39,6 +39,7 @@ var actionRuleScope = map[string]struct {
 	"checkout-static-credentials":     {scope: actionApplies},         // the inputs of actions/checkout steps
 	"concurrency-cancels-prs":         {scope: actionNotApplicable},   // concurrency: belongs to the workflow
 	"concurrency-cancels-release":     {scope: actionNotApplicable},   // concurrency: belongs to the workflow
+	"concurrency-deadlock":            {scope: actionNotApplicable},   // concurrency: belongs to the workflow
 	"continue-on-error":               {scope: actionApplies},         // the steps option; an action has no jobs
 	"deprecated-runner-label":         {scope: actionNotApplicable},   // runs-on: belongs to the calling job
 	"duplicate-triggers":              {scope: actionNotApplicable},   // on: belongs to the workflow
