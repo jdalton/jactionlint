@@ -73,6 +73,8 @@ type RuleGitHubEnv struct {
 	// multilineOnly makes an input that is one line (a title, a branch name) an ordinary value: the output-clobbering
 	// rule is about a line break in the value.
 	multilineOnly bool
+	// checkouts caches, for the earlier steps of the job, whether the script checks out a pull request.
+	checkouts map[*Step]bool
 }
 
 // NewRuleGitHubEnv creates a new RuleGitHubEnv instance.
@@ -318,6 +320,13 @@ func (rule *RuleGitHubEnv) judgeWord(s *runscript.Script, w *runscript.Word, dep
 	d := rule.judgeExprList(exprs, depth)
 	if d.kind == dataUntrusted {
 		return d
+	}
+	// the output of `gh pr view --json title` and of `git log --format=%s` is text of outsiders
+	for _, c := range subs {
+		if src, ok := rule.scriptTaint(s, c); ok && (!rule.multilineOnly || src.multiline()) && !(src.nameOnly() && rule.dest == "GITHUB_ENV") {
+			// the name of a branch or of an account is one line: it cannot add a variable to the environment
+			return data{kind: dataUntrusted, input: src.desc, cmd: true, multiline: src.multiline()}
+		}
 	}
 	if w.Subst && (len(w.Subs) == 0 || (len(subs) > 0 && !benignSubs(subs))) {
 		d = d.worse(data{kind: dataUnknown})

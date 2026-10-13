@@ -104,7 +104,7 @@ func (rule *RuleOutputClobbering) VisitStep(n *Step) error {
 					}
 					continue
 				}
-				if c.d.kind == dataUntrusted && exprMayHaveNewline(c.d.input) && !open.random {
+				if c.d.kind == dataUntrusted && c.d.mayHaveNewline() && !open.random {
 					rule.report(s, origin, n, w, c, open.name, open.text, "delimiter")
 				}
 				continue
@@ -117,12 +117,12 @@ func (rule *RuleOutputClobbering) VisitStep(n *Step) error {
 				delim := printfDelimiter(c.cmd, t, m[2])
 				open = &outputDelimiter{name: m[1], text: delim, random: rule.randomDelimiter(s, n, delim, at)}
 				// a printf or an echo that writes the delimiter and the value in one command
-				if c.d.kind == dataUntrusted && exprMayHaveNewline(c.d.input) && !open.random {
+				if c.d.kind == dataUntrusted && c.d.mayHaveNewline() && !open.random {
 					rule.report(s, origin, n, w, c, open.name, open.text, "delimiter")
 				}
 				continue
 			}
-			if c.d.kind == dataUntrusted && exprMayHaveNewline(c.d.input) {
+			if c.d.kind == dataUntrusted && c.d.mayHaveNewline() {
 				name := ""
 				if len(c.names) > 0 {
 					name = c.names[0] // the record whose value is untrusted, not the first of the command
@@ -376,7 +376,7 @@ func (rule *RuleOutputClobbering) untrustedRecordNames(s *runscript.Script, p *r
 	f := rule.flow
 	f.at = p.Offset
 	f.loop = p.LoopBody || p.InFunc
-	hostile := func(d data) bool { return d.kind == dataUntrusted && exprMayHaveNewline(d.input) }
+	hostile := func(d data) bool { return d.kind == dataUntrusted && d.mayHaveNewline() }
 	conv := 0
 	var names []string
 	for _, l := range printedLines(p) {
