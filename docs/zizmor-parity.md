@@ -495,8 +495,8 @@ Not reported: archives that are downloaded, extracted and run, `go install` or `
   an output of an earlier step is not followed (except the outputs of the actions that look up the pull request of a comment), and the head
   that a workflow passes to a local reusable workflow or composite action is followed one call at a time, not through a composite action
   that calls another one. "Runs it" is a list of commands: an unusual build tool that is not in the list of
-  commands that only read files counts as running code, while an action that builds the workspace and is not in the short list does
-  not. `untrusted-checkout` knows the protection of `actions/checkout` against the code of fork pull requests (zizmor
+  commands that only read files counts as running code, while an action that runs the workspace and is not in the list (a few dozen actions of poutine and CodeQL, some with an input
+  that must be set) does not. `untrusted-checkout` knows the protection of `actions/checkout` against the code of fork pull requests (zizmor
   [#2134](https://github.com/zizmorcore/zizmor/issues/2134), poutine#450): `allow-unsafe-pr-checkout: true` or an expression is a finding of
   its own, and a checkout that a guarded version refuses is reported only with the option `pedantic`. Which versions are guarded is a
   list of floors and the version comment of a commit, which is not verified (see the checks document). Conditions on `needs` and `steps` are guards, and so is `github.event.pull_request.merged == true` for a checkout of the merged commit.
