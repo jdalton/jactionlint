@@ -2314,6 +2314,16 @@ retired and which labels to use instead, with the announcement. A job on such a 
 [`deprecated-runner-label`](#check-deprecated-runner-label) until that day; on the day of the retirement `unknown-runner-label` reports it, with the
 same message as for the labels that went before it, whatever the version of jactionlint.
 
+The labels of the services that host runners for GitHub Actions are accepted without configuration, so that a workflow that runs fine
+is not an error: Blacksmith (`blacksmith-*`), Depot (`depot-ubuntu-*`, `depot-windows-*`, `depot-macos-*`), Namespace (`namespace-profile-*`,
+`nscloud-*`, `namespace-features:*`), RunsOn (`runs-on=...`, `runner=...`, `family=...`, `image=...`, `cpu=...`, `ram=...`, `spot=...`,
+`extras=...`, `pool=...`, `volume=...`, `retry=...`, `ami=...`, `sticky=...`), Ubicloud (`ubicloud`, `ubicloud-arm`, `ubicloud-standard-*`, `ubicloud-premium-*`) and WarpBuild
+(`warp-*`). The prefixes are the ones the documentation of each service names, and a label needs something after the prefix. They do not take part in the check
+of conflicting labels, since the label of a service says nothing about the operating system. BuildJet is not in the list: the service was shut down
+on 2026-03-31. Labels of other services, or of a provider you want to be reported, are set with `self-hosted-runner.labels`, and
+`self-hosted-runner.providers` names the providers which are accepted (all of them when it is not set, none for `[]`); see the [configuration](config.md).
+`self-hosted-runner.strict-labels` accepts only the labels in `labels`, as before.
+
 In addition to checking label values, jactionlint checks combinations of labels. `runs-on:` section can be an array that contains
 multiple labels. In this case, a runner which has all the labels will be selected. However, those labels combinations can have
 conflicts.
@@ -6360,6 +6370,14 @@ the trigger either way.
 The rule otherwise only looks at the trigger, so a workflow that uses one of them safely is reported as well. Ignore it with
 `# jactionlint ignore=dangerous-triggers` and a reason, as in `zizmor: ignore[dangerous-triggers]`. zizmor 1.30.1 does not report
 `issue_comment` yet.
+
+What GitHub does by default does not make the finding moot. GitHub is introducing a [default rule](https://github.blog/changelog/2026-09-17-workflow-execution-protections-in-github-actions-generally-available)
+that disables `pull_request_target` in public repositories which have no applicable Actions event policy: it starts in evaluate mode and is
+enforced on 2026-11-02 for the repositories that used the default policy before the general availability. A workflow can be allow-listed by its file, and an
+Actions event policy can allow the trigger. So a `pull_request_target` workflow of a public repository may stop running unless an
+event policy allows it, and one that is allowed is exactly as dangerous as described above. The rule does not know the event policies of your
+repository, so it reports the trigger either way. Another platform default reduces the risk without removing it: a run of an untrusted trigger (`pull_request_target`, `issue_comment`)
+gets a [read-only Actions cache](https://github.blog/changelog/2026-06-26-read-only-actions-cache-for-untrusted-triggers), which blocks writing to the cache.
 
 <a id="check-self-hosted-runner"></a>
 ## Self-hosted runners (pedantic)
