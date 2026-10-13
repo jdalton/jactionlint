@@ -135,7 +135,7 @@ jobs:
 Output:
 
 ```
-test.yaml:6:5: unexpected key "default" for "job" section. expected one of "cache-mode", "concurrency", "container", "continue-on-error", "defaults", "env", "environment", "if", "name", "needs", "outputs", "permissions", "runs-on", "secrets", "services", "snapshot", "steps", "strategy", "timeout-minutes", "uses", "with" [workflow-syntax]
+test.yaml:6:5: unexpected key "default" for "job" section. expected one of "cache-mode", "cancel-timeout-minutes", "concurrency", "container", "continue-on-error", "defaults", "env", "environment", "if", "name", "needs", "outputs", "permissions", "runs-on", "secrets", "services", "snapshot", "steps", "strategy", "timeout-minutes", "uses", "with" [workflow-syntax]
   |
 6 |     default:
   |     ^~~~~~~~
@@ -543,7 +543,7 @@ test.yaml:7:24: undefined variable "unknown_context". available variables are "e
   |
 7 |       - run: echo '${{ unknown_context }}'
   |                        ^~~~~~~~~~~~~~~
-test.yaml:9:24: property "events" is not defined in object type {action: string; action_path: string; action_ref: string; action_repository: string; action_status: string; actor: string; actor_id: string; api_url: string; artifact_cache_size_limit: number; base_ref: string; env: string; event: object; event_name: string; event_path: string; graphql_url: string; head_ref: string; job: string; job_workflow_sha: string; output: string; path: string; ref: string; ref_name: string; ref_protected: bool; ref_type: string; repository: string; repository_id: string; repository_owner: string; repository_owner_id: string; repository_visibility: string; repositoryurl: string; retention_days: number; run_attempt: string; run_id: string; run_number: string; secret_source: string; server_url: string; sha: string; state: string; step_summary: string; token: string; triggering_actor: string; workflow: string; workflow_ref: string; workflow_sha: string; workspace: string} [undefined-property]
+test.yaml:9:24: property "events" is not defined in object type {action: string; action_path: string; action_ref: string; action_repository: string; action_status: string; actor: string; actor_id: string; api_url: string; artifact_cache_size_limit: number; artifacts: string; artifacts_list: string; base_ref: string; env: string; event: object; event_name: string; event_path: string; graphql_url: string; head_ref: string; job: string; job_workflow_sha: string; output: string; path: string; ref: string; ref_name: string; ref_protected: bool; ref_type: string; repository: string; repository_id: string; repository_owner: string; repository_owner_id: string; repository_visibility: string; repositoryurl: string; retention_days: number; run_attempt: string; run_id: string; run_number: string; secret_source: string; server_url: string; sha: string; state: string; step_summary: string; token: string; triggering_actor: string; workflow: string; workflow_ref: string; workflow_sha: string; workspace: string} [undefined-property]
   |
 9 |       - run: echo '${{ github.events }}'
   |                        ^~~~~~~~~~~~~
@@ -3362,7 +3362,7 @@ test.yaml:4:14: "write" is invalid for permission for all the scopes. available 
   |
 4 | permissions: write
   |              ^~~~~
-test.yaml:11:7: unknown permission scope "check". all available permission scopes are "actions", "artifact-metadata", "attestations", "checks", "code-quality", "contents", "copilot-requests", "deployments", "discussions", "id-token", "issues", "models", "packages", "pages", "pull-requests", "repository-projects", "security-events", "statuses", "vulnerability-alerts" [invalid-permissions]
+test.yaml:11:7: unknown permission scope "check". all available permission scopes are "actions", "artifact-metadata", "attestations", "checks", "code-quality", "contents", "copilot-requests", "deployments", "discussions", "drives", "id-token", "issues", "models", "packages", "pages", "pull-requests", "repository-projects", "security-events", "statuses", "vulnerability-alerts" [invalid-permissions]
    |
 11 |       check: write
    |       ^~~~~~
@@ -4645,7 +4645,7 @@ test.yaml:30:20: context "env" is not allowed here. no context is available here
    |
 30 |         shell: ${{ env.SHELL}}
    |                    ^~~~~~~~~
-test.yaml:32:33: calling function "success" is not allowed here. "success" is only available in "jobs.<job_id>.if", "jobs.<job_id>.steps.if". see https://docs.github.com/en/actions/learn-github-actions/contexts#context-availability for more details [context-availability]
+test.yaml:32:33: calling function "success" is not allowed here. "success" is only available in "jobs.<job_id>.if", "jobs.<job_id>.steps.if", "jobs.<job_id>.snapshot.if". see https://docs.github.com/en/actions/learn-github-actions/contexts#context-availability for more details [context-availability]
    |
 32 |         run: echo 'Success? ${{ success() }}'
    |                                 ^~~~~~~~~
