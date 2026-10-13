@@ -229,6 +229,7 @@
               "unknown-workflow-input",
               "unknown-workflow-secret",
               "unlocked-install",
+              "unpinnable-action",
               "unpinned-images",
               "unpinned-tools",
               "unpinned-uses",
@@ -455,6 +456,7 @@
                   "unknown-workflow-input",
                   "unknown-workflow-secret",
                   "unlocked-install",
+                  "unpinnable-action",
                   "unpinned-images",
                   "unpinned-tools",
                   "unpinned-uses",
@@ -612,6 +614,7 @@
                     "unknown-workflow-input",
                     "unknown-workflow-secret",
                     "unlocked-install",
+                    "unpinnable-action",
                     "unpinned-images",
                     "unpinned-tools",
                     "unpinned-uses",
@@ -3812,6 +3815,32 @@
         },
         "unlocked-install": {
           "description": "cargo install runs without --locked, or npm, yarn or pnpm install without freezing a lock file that the repository has. With the option pedantic, also installs without a lock file, npm, Yarn and bun installs that run the lifecycle scripts of the dependencies (and aube installs that allow every build), and installs without a release-age cooldown. Group: security. Profile: default. Default level: error. https://jactionlint.jdx.dev/rules#unlocked-install",
+          "oneOf": [
+            {
+              "$ref": "#/definitions/level"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "level": {
+                  "allOf": [
+                    {
+                      "$ref": "#/definitions/severity"
+                    }
+                  ],
+                  "description": "The level of the rule: error, warn, info or off."
+                },
+                "pedantic": {
+                  "description": "Also report the pedantic checks, which are noisier. Unset, they run under the pedantic profile.",
+                  "type": "boolean"
+                }
+              },
+              "type": "object"
+            }
+          ]
+        },
+        "unpinnable-action": {
+          "description": "A hash-pinned action pulls in an action or a Docker image by a tag or a branch, so its pin does not freeze what runs. Only with the option pedantic. Group: security. Runs only with --online. Default level: warn. https://jactionlint.jdx.dev/rules#unpinnable-action",
           "oneOf": [
             {
               "$ref": "#/definitions/level"
