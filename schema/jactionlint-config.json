@@ -194,6 +194,7 @@
               "missing-action-input",
               "missing-permissions",
               "missing-timeout",
+              "missing-version-comment",
               "missing-workflow-input",
               "missing-workflow-secret",
               "multiline-plain-run",
@@ -425,6 +426,7 @@
                   "missing-action-input",
                   "missing-permissions",
                   "missing-timeout",
+                  "missing-version-comment",
                   "missing-workflow-input",
                   "missing-workflow-secret",
                   "multiline-plain-run",
@@ -587,6 +589,7 @@
                     "missing-action-input",
                     "missing-permissions",
                     "missing-timeout",
+                    "missing-version-comment",
                     "missing-workflow-input",
                     "missing-workflow-secret",
                     "multiline-plain-run",
@@ -3022,6 +3025,28 @@
                   "minimum": 0,
                   "type": "integer"
                 },
+                "level": {
+                  "allOf": [
+                    {
+                      "$ref": "#/definitions/severity"
+                    }
+                  ],
+                  "description": "The level of the rule: error, warn, info or off."
+                }
+              },
+              "type": "object"
+            }
+          ]
+        },
+        "missing-version-comment": {
+          "description": "A hash-pinned action has no comment which names its version. Group: policy. Profile: pedantic. Default level: warn. https://jactionlint.jdx.dev/rules#missing-version-comment",
+          "oneOf": [
+            {
+              "$ref": "#/definitions/level"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
                 "level": {
                   "allOf": [
                     {
