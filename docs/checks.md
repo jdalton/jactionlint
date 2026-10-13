@@ -4857,6 +4857,24 @@ these, the first one in lexical order. So `node` beats `docker.io/library/*`, `d
 beats `node`, and `ghcr.io/org/app` beats `ghcr.io/org/*`, which beats `ghcr.io/*` and `*`. A policy wins over `require-digest`. `node` and `docker.io/library/node` are the same image.
 To forbid or allow images by name, see the options `images-allow` and `images-deny` of [`forbidden-uses`](#check-forbidden-uses).
 
+With `--online --fix=unsafe` the digest is written for you: `postgres:16` becomes `postgres:16@sha256:...` (the format Renovate keeps up to date), and an
+image without a tag becomes `image:latest@sha256:...`, because that is what Docker pulls. It works for `container:`, `services:`, the values a
+matrix writes, `uses: docker://` and the `runs.image: docker://` of an action. The digest is asked of the registry (the v2 API, a HEAD request of the
+manifest) and is the one `docker pull image:tag` resolves today: for a multi-platform image the digest of its index. Only
+Docker Hub (`docker.io`, `ubuntu`, `owner/image`) and ghcr.io are asked, and an image of another registry gets the reason in the finding instead of a
+request. Both give an anonymous token for a public image; for a private image on ghcr.io the token of GitHub (`GITHUB_TOKEN`) is sent to ghcr.io as
+its password when the anonymous request is refused, and to no other host. The fix is **unsafe** (`--fix=unsafe`): the image behind a tag moves,
+and the digest is the image of this moment, so look at what you are pinning. It never updates a pin to a newer image. `--online-allow` and `--online-deny`
+apply to images as `owner/image` (`library/ubuntu` for an official image of Docker Hub), whichever registry it is on, and `--online=cache` does not look images up at all (a digest is not kept in the cache, because a tag moves; the finding says that the fix needs `--online`, and it is no skipped lookup for `strict`). It does not ask
+the registry. A tag that does not exist, a private image and a registry which fails leave the finding without a fix, with the reason.
+What the answers of the registries mean (the same for Docker Hub and ghcr.io):
+
+| Request | Answer | Meaning |
+| --- | --- | --- |
+| token service | 401, 403, 404, 429, 5xx, no answer | the registry fails: the finding says so, and after three failures in a row (at once for a rate limit) the registry is not asked again in this run |
+| manifest | 401, 403, 404 | the registry answered: the image is private or does not exist for this token. No failure, no backoff. ghcr.io is asked once more with the GitHub token first |
+| manifest | 429, 5xx, no answer | the registry fails, as above |
+
 <a id="check-self-repository"></a>
 ## Self-repository syntax (pedantic)
 
