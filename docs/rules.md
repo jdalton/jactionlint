@@ -117,6 +117,7 @@ rules:
 | [invisible-characters](#invisible-characters) | security | error | default |
 | [known-vulnerable-actions](#known-vulnerable-actions) | security | error | only with `--online` |
 | [local-action-checkout](#local-action-checkout) | correctness | error | correctness |
+| [macos-gnu-flags](#macos-gnu-flags) | correctness | warn | pedantic |
 | [malformed-expression-delimiters](#malformed-expression-delimiters) | correctness | error | correctness |
 | [matrix-duplicate-value](#matrix-duplicate-value) | correctness | error | correctness |
 | [matrix-invalid-exclude](#matrix-invalid-exclude) | correctness | error | correctness |
@@ -982,6 +983,15 @@ A local action is used before any step checks out the repository.
 - Default level: error
 - Profile: correctness
 - Details and examples: [checks](./checks.md#check-local-action-checkout)
+
+## macos-gnu-flags
+
+A command at run: has a GNU-only option and the job runs on macOS, which has the BSD command.
+
+- Group: correctness
+- Default level: warn
+- Profile: pedantic
+- Details and examples: [checks](./checks.md#check-macos-gnu-flags)
 
 ## malformed-expression-delimiters
 

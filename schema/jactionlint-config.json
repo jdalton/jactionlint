@@ -186,6 +186,7 @@
               "invisible-characters",
               "known-vulnerable-actions",
               "local-action-checkout",
+              "macos-gnu-flags",
               "malformed-expression-delimiters",
               "matrix-duplicate-value",
               "matrix-invalid-exclude",
@@ -419,6 +420,7 @@
                   "invisible-characters",
                   "known-vulnerable-actions",
                   "local-action-checkout",
+                  "macos-gnu-flags",
                   "malformed-expression-delimiters",
                   "matrix-duplicate-value",
                   "matrix-invalid-exclude",
@@ -583,6 +585,7 @@
                     "invisible-characters",
                     "known-vulnerable-actions",
                     "local-action-checkout",
+                    "macos-gnu-flags",
                     "malformed-expression-delimiters",
                     "matrix-duplicate-value",
                     "matrix-invalid-exclude",
@@ -2827,6 +2830,28 @@
         },
         "local-action-checkout": {
           "description": "A local action is used before any step checks out the repository. Group: correctness. Profile: correctness. Default level: error. https://jactionlint.jdx.dev/rules#local-action-checkout",
+          "oneOf": [
+            {
+              "$ref": "#/definitions/level"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "level": {
+                  "allOf": [
+                    {
+                      "$ref": "#/definitions/severity"
+                    }
+                  ],
+                  "description": "The level of the rule: error, warn, info or off."
+                }
+              },
+              "type": "object"
+            }
+          ]
+        },
+        "macos-gnu-flags": {
+          "description": "A command at run: has a GNU-only option and the job runs on macOS, which has the BSD command. Group: correctness. Profile: pedantic. Default level: warn. https://jactionlint.jdx.dev/rules#macos-gnu-flags",
           "oneOf": [
             {
               "$ref": "#/definitions/level"

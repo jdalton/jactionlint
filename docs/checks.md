@@ -77,6 +77,7 @@ List of checks:
 - [Dependabot insecure code execution](#check-dependabot-execution)
 - [Dependabot updates of actions (pedantic)](#check-dependabot-missing-actions-update)
 - [Pipelines that hide failures](#check-pipeline-without-pipefail)
+- [GNU-only options on macOS runners (pedantic)](#check-macos-gnu-flags)
 - [Workflow and job names (pedantic)](#check-anonymous-definition)
 - [Concurrency limits](#check-concurrency-limits)
 - [Inherited secrets](#check-secrets-inherit)
@@ -7311,6 +7312,87 @@ be turned off with `rules: {pipeline-without-pipefail: off}`:
 There is no `conservative` mode: it would have to guess which of these a finding is, and the guesses are the ones above.
 
 
+<a id="check-macos-gnu-flags"></a>
+## GNU-only options on macOS runners (pedantic)
+
+Example input:
+
+```yaml
+on: push
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - run: make 2>&1 | tee --append build.log
+      - run: sed -i 's/0.0.0/1.2.3/' version.txt
+      - run: grep -oP 'v\K[0-9.]+' version.txt
+```
+
+Output:
+<!-- Skip update output -->
+```
+test.yaml:9:30: warning: "tee --append" is rejected by the tee of macOS ("illegal option -- -"): it has only short options. The job runs on macOS (macos-latest), whose tee is the BSD one. Use "tee -a". [macos-gnu-flags]
+  |
+9 |       - run: make 2>&1 | tee --append build.log
+  |                              ^~~~~~~~
+test.yaml:10:18: warning: "sed -i" without a suffix takes the script as the suffix of the backup on macOS, so the file is read as the script ("invalid command code"). The job runs on macOS (macos-latest), whose sed is the BSD one. Use "sed -i.bak" (and remove the backup), which both seds understand, or "sed -i ''" on macOS only. [macos-gnu-flags]
+   |
+10 |       - run: sed -i 's/0.0.0/1.2.3/' version.txt
+   |                  ^~
+test.yaml:11:19: warning: "grep -P" is rejected by the grep of macOS ("invalid option -- P"): it has no Perl regular expressions. The job runs on macOS (macos-latest), whose grep is the BSD one. Use "grep -E" if the pattern allows it, or "perl -ne", which macOS has too. [macos-gnu-flags]
+   |
+11 |       - run: grep -oP 'v\K[0-9.]+' version.txt
+   |                   ^~~
+```
+
+<!-- Skip playground link -->
+
+The output above is from the following `rules` section of the [configuration file](config.md):
+
+```yaml
+rules:
+  macos-gnu-flags: warn
+```
+
+The rule `macos-gnu-flags` (in the `pedantic` profile, as a warning) reports an option of a command in a `run:` script that the GNU
+version of the command has and the BSD version on macOS does not, in a job that runs on macOS: a `runs-on` label of a GitHub-hosted
+macOS runner (`macos-latest`, `macos-15`, `macos-14-large`, `xcode-27`, ...) or a value of `runs-on: ${{ matrix.os }}` that is one. A workflow
+that was written and tried on Linux fails with `tee: illegal option -- -` on the first macOS job.
+
+It reports only what the sources that Apple publishes for the commands of macOS (`shell_cmds`, `file_cmds` and `text_cmds` of
+[apple-oss-distributions](https://github.com/apple-oss-distributions)) show to fail:
+
+| Form                                                | macOS                                                                                 |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `tee --append`                                      | `tee` has only `-a` and `-i`, and no long option                                      |
+| `sed -i 's/a/b/' file` (no suffix)                  | `-i` takes the next word as the suffix of the backup, so the script is taken for it   |
+| `sed --in-place`                                    | `sed` has no long option                                                              |
+| `date -d`, `date --date`                            | `date` has no `-d`; BSD `date` reads a time with `-j -f` and `-v`                     |
+| `grep -P`, `grep --perl-regexp`                     | the options of the macOS `grep` have no `P`                                           |
+| `stat -c`, `stat --format`                          | the format option of BSD `stat` is `-f`                                               |
+| `find -printf`, `-regextype`, `-xtype`              | they are not primaries of the macOS `find`                                            |
+| `cp --parents`                                      | `cp` has no long option                                                               |
+
+Forms that look GNU-only and work on macOS are not reported: `xargs -r` (accepted for compatibility), `sort -V` and `readlink -f`
+(since macOS 12.3).
+
+The rule leaves out what may be meant for another system: a job on a self-hosted runner (its owner can have installed the GNU
+tools), a job that runs in a `container:`, a command whose failure the script handles (`if grep -P ...`), a script that also calls the
+command in the form of macOS (`date -j -f ... || date -d ...`, `stat -f` next to `stat -c`, `sed -i bak` next to `sed -i`, `tee -a`), and a step
+whose `if:` reads the `runner` or `matrix` context, or whose script is written for more than one system. That is decided
+from the parsed script, not from its text: it expands `$OSTYPE` or `$RUNNER_OS`, reads `runner.os` or `matrix.os` in an
+expression, calls `uname` or `sw_vers`, has a GNU tool by its Homebrew name as a command word (`gsed`, `gdate`, ...), or names a
+`gnubin` directory. `brew install coreutils` (or `grep`, `gnu-sed`, ...) alone is not enough: the formulas are keg-only, so the BSD
+tool stays first on the `PATH` until the `gnubin` directory is put on it. The real command is found behind `sudo`, `env`, `timeout`,
+`nice`, `xargs`, `ionice`, `setsid`, `chronic` and the like, with their options. The command line in the operand of `env -S '...'` is read
+for the check of what the script is written for (`env -S 'gsed ...'`), but a GNU-only option in it is not reported, because its words have no place of their
+own in the script. Scripts of other shells than bash and sh are not looked at.
+
+There is no automatic fix: the portable form depends on the script.
+
 <a id="check-anonymous-definition"></a>
 ## Workflow and job names (pedantic)
 
@@ -10773,7 +10855,7 @@ How the rules treat actions:
 
 - **Applies** to the steps (and the metadata) of an action: `action-release-cooldown`, `action-syntax`, `actions-lock`, `actions-lock-drift`, `adhoc-packages`, `archived-uses`, `argument-injection`, `artipacked`, `background-step-not-waited`, `checkout-static-credentials`, `command-injection`, `conflicting-action-inputs`, `constant-condition`, `context-availability`, `continue-on-error`, `deprecated-action-input`, `deprecated-commands`, `deprecated-node-runtime`, `duplicate-key`, `duplicate-step-id`, `environment-file-redirect`, `expired-ignore`, `expression-syntax`, `expression-type`, `fail-fast-action-inputs`, `forbidden-uses`, `github-app`, `github-script-syntax`, `if-always-true`, `impostor-commit`, `insecure-commands`, `insecure-ssh-keyscan`, `insecure-url-scheme`, `invalid-env-var-name`, `invalid-function-call`, `invalid-id`, `invalid-ignore-comment`, `invalid-local-action`, `invalid-parallel-step`, `invalid-shell-name`, `invalid-uses`, `invisible-characters`, `known-vulnerable-actions`, `malformed-expression-delimiters`, `max-run-lines`, `merge-key`, `misfeature`, `missing-action-input`, `missing-version-comment`, `multiline-plain-run`, `obfuscation`, `outdated-action-runner`, `output-clobbering`, `pipeline-without-pipefail`, `pyflakes`, `recursive-alias`, `ref-confusion`, `ref-version-mismatch`, `repojacking`, `require-expression-wrapping`, `self-repository`, `shellcheck`, `stale-action-refs`, `superfluous-actions`, `template-injection`, `typosquat-uses`, `undefined-function`, `undefined-property`, `unknown-action-input`, `unlocked-install`, `unpinnable-action`, `unpinned-images`, `unpinned-tools`, `unpinned-uses`, `unsound-contains`, `unsound-prefix-match`, `unsound-ternary`, `unused-anchor`, `unused-ignore`, `unverified-download`, `use-trusted-publishing`, `yaml-syntax`.
 - **Caller-dependent**: `agentic-actions`, `bot-conditions`, `cache-poisoning`, `github-env` (its findings about untrusted input do not depend on the caller), `untrusted-artifact` and `untrusted-checkout`.
-- **Not applicable** because an action does not have what the rule checks, or because only the calling job can decide (`unused-baseline-entry` is about the baseline file, not about a workflow or an action): `anonymous-definition`, `comment-trigger-authorization`, `concurrency-cancels-prs`, `concurrency-cancels-release`, `concurrency-deadlock`, `concurrency-limits`, `conflicting-runner-labels`, `cron-too-frequent`, `cyclic-job-needs`, `dangerous-triggers`, `dependabot-cooldown`, `dependabot-execution`, `dependabot-missing-actions-update`, `dependabot-syntax`, `deprecated-runner-label`, `duplicate-job-id`, `duplicate-job-needs`, `duplicate-triggers`, `event-name-never-received`, `excessive-permissions`, `gate-job-skipped-on-failure`, `gh-without-token`, `hardcoded-container-credentials`, `insufficient-permissions`, `invalid-activity-type`, `invalid-cron`, `invalid-event-config`, `invalid-event-filter`, `invalid-glob`, `invalid-label-pattern`, `invalid-local-workflow`, `invalid-permissions`, `invalid-timezone`, `invalid-workflow-call`, `invalid-workflow-call-input`, `invalid-workflow-dispatch-input`, `local-action-checkout`, `matrix-duplicate-value`, `matrix-invalid-exclude`, `missing-permissions`, `missing-timeout`, `missing-workflow-input`, `missing-workflow-secret`, `mutable-runner-label`, `overprovisioned-secrets`, `require-shell`, `required-actions`, `secrets-inherit`, `secrets-outside-env`, `self-hosted-runner`, `timeout-too-long`, `ubuntu-slim-limits`, `undefined-job-needs`, `undocumented-permissions`, `unknown-event`, `unknown-runner-label`, `unknown-workflow-input`, `unknown-workflow-secret`, `unmatched-paths-filter`, `unredacted-secrets`, `unused-baseline-entry`, `unused-job-output`, `unused-needs`, `unused-workflow-input`, `unused-workflow-secret`, `workflow-call-permissions`, `workflow-input-type`, `workflow-run-names`, `workflow-secret-scope`, `workflow-syntax`.
+- **Not applicable** because an action does not have what the rule checks, or because only the calling job can decide (`unused-baseline-entry` is about the baseline file, not about a workflow or an action): `anonymous-definition`, `comment-trigger-authorization`, `concurrency-cancels-prs`, `concurrency-cancels-release`, `concurrency-deadlock`, `concurrency-limits`, `conflicting-runner-labels`, `cron-too-frequent`, `cyclic-job-needs`, `dangerous-triggers`, `dependabot-cooldown`, `dependabot-execution`, `dependabot-missing-actions-update`, `dependabot-syntax`, `deprecated-runner-label`, `duplicate-job-id`, `duplicate-job-needs`, `duplicate-triggers`, `event-name-never-received`, `excessive-permissions`, `gate-job-skipped-on-failure`, `gh-without-token`, `hardcoded-container-credentials`, `insufficient-permissions`, `invalid-activity-type`, `invalid-cron`, `invalid-event-config`, `invalid-event-filter`, `invalid-glob`, `invalid-label-pattern`, `invalid-local-workflow`, `invalid-permissions`, `invalid-timezone`, `invalid-workflow-call`, `invalid-workflow-call-input`, `invalid-workflow-dispatch-input`, `local-action-checkout`, `macos-gnu-flags`, `matrix-duplicate-value`, `matrix-invalid-exclude`, `missing-permissions`, `missing-timeout`, `missing-workflow-input`, `missing-workflow-secret`, `mutable-runner-label`, `overprovisioned-secrets`, `require-shell`, `required-actions`, `secrets-inherit`, `secrets-outside-env`, `self-hosted-runner`, `timeout-too-long`, `ubuntu-slim-limits`, `undefined-job-needs`, `undocumented-permissions`, `unknown-event`, `unknown-runner-label`, `unknown-workflow-input`, `unknown-workflow-secret`, `unmatched-paths-filter`, `unredacted-secrets`, `unused-baseline-entry`, `unused-job-output`, `unused-needs`, `unused-workflow-input`, `unused-workflow-secret`, `workflow-call-permissions`, `workflow-input-type`, `workflow-run-names`, `workflow-secret-scope`, `workflow-syntax`.
 
 Example input:
 
