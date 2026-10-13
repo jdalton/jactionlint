@@ -4620,6 +4620,45 @@ An image written with an expression is checked as far as it can be known:
 
 Docker images used as actions (`uses: docker://alpine:3.20`) are checked by the [`unpinned-uses`](#check-action-format) rule.
 
+The images that a script pulls are checked too: the image of `docker run`, `docker create` and `docker pull` (and `docker container
+run`, `docker image pull`, and the same commands of `podman` and `nerdctl`), with the same messages:
+
+```yaml
+steps:
+  # ERROR: the image of the script is not pinned either
+  - run: docker run --rm -v "$PWD:/w" -w /w node:20 npm test
+```
+
+The command line is read as far as its options are known. A command with an option it does not know is skipped (the option could
+take the image as its value), and so are an image which is a variable, an expression or a command substitution, an image id,
+`scratch`, and an image that the workflow builds itself: the name of a `docker build -t`/`--tag`, a `docker tag` or `docker commit`
+target, a `tags:` of `docker/build-push-action`, a name which another command of the repository gets as an argument
+(`./build.sh app:ci`, `docker push app:ci`), and every image of a workflow that loads archives (`docker load`) or uses
+`docker compose`, `docker/bake-action`, buildah or kaniko. `docker build --pull` names no image and is not checked, and
+the `FROM` lines of a Dockerfile are not read.
+
+The option `policies` sets how strongly the images that match a pattern are pinned, so that the images of your own registry can
+be pinned by a tag while the rest needs a digest:
+
+```yaml
+rules:
+  unpinned-images:
+    require-digest: true
+    policies:
+      "ghcr.io/my-org/*": tag-pin    # a tag other than latest, or a digest
+      "registry.example.com/*": any  # nothing is required
+      "node:20": any                 # a pattern with a tag matches that tag only
+      "*": hash-pin                  # a digest (the default of require-digest)
+```
+
+The policies are `hash-pin` (a digest), `tag-pin` (a tag other than `latest`, or a digest) and `any`. A pattern is a glob of the
+image name where `*` matches any characters, `/` included. When several patterns match an image, the most specific one decides, in this order: (1) more literal characters before the first
+`*` of the pattern with the registry written out (`node` is `docker.io/library/node`, and `docker.io/*` is `docker.io/library/*`), (2)
+fewer `*`, (3) a pattern with a tag beats the same name without one, (4) the longer pattern as written, and, for patterns that tie on all of
+these, the first one in lexical order. So `node` beats `docker.io/library/*`, `docker.io/library/*` beats `docker.io/*`, `node:20`
+beats `node`, and `ghcr.io/org/app` beats `ghcr.io/org/*`, which beats `ghcr.io/*` and `*`. A policy wins over `require-digest`. `node` and `docker.io/library/node` are the same image.
+To forbid or allow images by name, see the options `images-allow` and `images-deny` of [`forbidden-uses`](#check-forbidden-uses).
+
 <a id="check-self-repository"></a>
 ## Self-repository syntax (pedantic)
 
@@ -7523,6 +7562,22 @@ rules:
   forbidden-uses:
     deny:
       - tj-actions/changed-files
+```
+
+The options `images-allow` and `images-deny` do the same for container images: the image of `container:` and `services:`, of
+`uses: docker://`, of the `runs.image: docker://` of a Docker action, and of `docker run`, `docker create` and `docker pull` in a
+script (see [unpinned container images](#check-unpinned-images) for what is read). A pattern is a glob of the image name where `*`
+matches any characters, `/` included. The registry of Docker Hub can be left out (`node` is `docker.io/library/node`), and a pattern
+with a tag (`node:20`) matches that tag only. Images written with an expression are not judged.
+
+```yaml
+rules:
+  forbidden-uses:
+    images-allow:
+      - ghcr.io/my-org/*
+      - mirror.example.com/*
+    images-deny:
+      - "*:latest"
 ```
 
 The rule is for policy, so its default level is `error`. There is no automatic fix.
