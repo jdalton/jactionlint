@@ -107,6 +107,8 @@ cat action.yml | jactionlint --stdin-filename action.yml -
 | `--select=RULES` |  | Report only these comma separated rule IDs, also those the profile does not enable. Repeatable |
 | `--no-ignores` |  | Apply no ignore comment, no "ignores" or "paths" ignore of the config file and no baseline (--ignore still applies) |
 | `--list-rules` |  | List every rule ID with its group, profile, level and summary, and exit. --format json prints it as JSON |
+| `--print-config-schema` |  | Print the JSON Schema of the config file (rule IDs and options included) and exit |
+| `--print-output-schema` |  | Print the JSON Schema of --format json and jsonl and exit |
 | `--explain=RULE` |  | Print the documentation of a rule ID (summary, group, profile, level, options, fixes and its section of the checks document) and exit |
 
 **Fixing**
@@ -453,6 +455,19 @@ jactionlint --format json --finding-context | jq '.[] | select(.events | index("
 ```
 
 The fields are not in the output without the option, so existing consumers see no change.
+
+#### JSON Schema of the output
+
+`jactionlint --print-output-schema` prints the JSON Schema (draft-07) of the output of `--format json`, which is an array of the error objects
+above. Each line of `--format jsonl` is one error object, valid against `#/definitions/finding` of the same schema. The committed copy is
+[`schema/jactionlint-output.json`](https://github.com/jdx/jactionlint/blob/main/schema/jactionlint-output.json). It is the contract for programs which read the
+findings:
+
+- A field is not removed and does not change its meaning within a major version.
+- New fields can be added, so a reader has to ignore the fields it does not know (the schema does not set `additionalProperties: false`).
+- `message`, `line`, `column`, `end_line`, `end_column`, `kind`, `id` and `severity` are always present. The others are optional as described above.
+
+The same goes for the schema of [the config file](config.md#json-schema).
 
 #### Lines and columns
 
