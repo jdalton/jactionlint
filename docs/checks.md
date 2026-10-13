@@ -7544,6 +7544,83 @@ not know that a field of a JSON document is a secret too, so the extracted value
 Store each field in its own secret (`secrets.CREDENTIALS_PASSWORD`). Passing the whole parsed secret on (`fromJSON(secrets.X)`
 without a property access) is not reported. There is no automatic fix.
 
+With the option `pedantic` (on under the `pedantic` profile) the rule also follows the **shell** form of the same problem
+(sisakulint's `secret-in-log`, CodeQL's `UnmaskedSecretExposure`): a script cuts a value out of a secret and prints it.
+
+Example input:
+
+```yaml
+on: push
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          KEY=$(jq -r .private_key <<<"$CREDENTIALS")
+          echo "$KEY"
+        env:
+          CREDENTIALS: ${{ secrets.CREDENTIALS }}
+```
+
+Output:
+<!-- Skip update output -->
+```
+test.yaml:8:11: warning: the variable "KEY" is extracted from the secret CREDENTIALS with jq and printed here. the runner masks only the exact value of a secret, not a part of it, so the value is in the log in clear text. mask it first with `echo "::add-mask::$VALUE"` [unredacted-secrets]
+  |
+8 |           echo "$KEY"
+  |           ^~~~~
+```
+
+<!-- Skip playground link -->
+
+This is the output with the option `pedantic`, set for the rule in [the config file](config.md):
+
+```yaml
+rules:
+  unredacted-secrets:
+    pedantic: true
+```
+
+The runner masks a secret in the log by its exact value. `jq -r .private_key` makes a different string, which the runner does not know,
+and `echo` (or the trace of `set -x`) writes it in clear text. The check follows the variables of one `run:` script in the order of the source:
+
+- A variable is a **secret** when the `env:` of the step, the job or the workflow gives it a value with `secrets.X`, and so is a copy of
+  one (`A="$SECRET"`; the exact value stays masked). A `${{ secrets.X }}` written in the script counts as well.
+- A variable is **derived** when it is set from a command substitution which reads a secret and in which only `echo`, `printf`, `cat` and
+  the tools that cut a text (`jq`, `yq`, `cut`, `awk`, `sed`, `tr`, `base64`, `grep`, `head`, `tail`, `xxd`, `rev`, `fold`, `python`,
+  `node`, `perl`, `ruby`) stand between the secret and the value (`echo "$S" | base64 -d | jq -r .key`), from a parameter expansion that
+  cuts one (`${SECRET#prefix}`, `${SECRET:0:8}`), or when it is a copy of a derived variable.
+- It is reported where the variable is **printed**: `echo` or `printf` of it, `cat <<<"$KEY"` or a heredoc which expands it, or `echo "$(jq ... <<<"$S")"`.
+  And where `set -x` is on (also `set -euxo pipefail`, `set -o xtrace`) at the assignment or at a command that uses the value, because the
+  trace shows both with the values expanded; the value is in the log before any mask can take effect, so turn the trace off with `set +x`.
+- `echo "::add-mask::$KEY"` after the assignment and before the print makes it safe.
+
+Not reported: the value as the argument of another command (`curl -H "Authorization: $KEY"`, `./deploy --key "$KEY"`), a value written to a
+file or to `$GITHUB_ENV` or `$GITHUB_OUTPUT`, a value piped into another command (`echo "$KEY" | base64 -d > key.pem`), the exact
+secret or a string that contains it, a hash (`sha256sum`) or a count (`wc -c`) of it, and the answer of a service that gets the secret as
+credentials (`curl -u "$S" ... | jq -r .id`).
+
+**The shell that is understood.** The check answers one question: what does a word hold, once the shell has expanded it? It asks it
+for the words of a command, the value of an assignment (`A=`, `A+=`, `export A=`), a here-string and an unquoted heredoc (also a
+`${{ secrets.X }}` in it). A command substitution holds what its last command prints, followed back along its pipe through `echo`,
+`printf`, `cat` and the tools above, also when substitutions are nested. A print is `echo`, `printf` or `cat` whose stdout is not
+redirected and not piped on (`echo "$KEY" | cat` prints, `echo "$KEY" | wc -c` does not); the input of `cat` is its here-string, its heredoc or
+the pipe. An expansion in a heredoc is valued as the same word on a command line (`${KEY:0:8}` is a cut, a masked variable is exact).
+A `::add-mask::` masks only when it is the whole line and printed that way: `echo "::add-mask::$KEY"` with that one argument, or
+`printf '::add-mask::%s\n' "$KEY"`, of exactly one variable or one `$(...)`. A mask of a cut (`${KEY:0:4}`), with more text or
+more arguments masks another string, and is an ordinary print. `printf -v NAME ...` (with `-v` as the first argument) assigns and
+prints nothing; `-v` after the format is data. Assignments
+inside a substitution stay in its subshell. Under `set -x` every command that expands a cut value is reported, an assignment included.
+Only `bash` and `sh` scripts are read, in the order of the source.
+The supported subset is pinned by a table of snippets, each reported or not (`TestUnredactedSecretsShellTable`), next to the golden
+`testdata/err/unredacted_secrets_shell.yaml`.
+
+**What is not understood, and so reported as nothing:** functions, loops and branches (the order of the source decides, so a mask in
+one `if` branch counts for the next), `eval`, `source`, `read`, `mapfile`, arrays, indirect expansion, a process substitution (`<(cmd)`
+is the name of a file), commands in the body of a heredoc as a source, a value that is written out by anything other than `echo`,
+`printf` and `cat` (`tee`, `logger`, `curl --data`), a secret that reaches the script through `with:` of an action, and `pwsh` or any
+other shell.
+
 <a id="check-secrets-outside-env"></a>
 ## Secrets outside an environment (pedantic)
 

@@ -3904,7 +3904,7 @@
           ]
         },
         "unredacted-secrets": {
-          "description": "A secret is parsed with fromJSON(), so the fields of it are not redacted in logs. Group: security. Profile: default. Default level: error. https://jactionlint.jdx.dev/rules#unredacted-secrets",
+          "description": "A secret is parsed with fromJSON(), so the fields of it are not redacted in logs. With the option pedantic, also a value that a script cuts from a secret and prints without masking it. Group: security. Profile: default. Default level: error. https://jactionlint.jdx.dev/rules#unredacted-secrets",
           "oneOf": [
             {
               "$ref": "#/definitions/level"
@@ -3919,6 +3919,10 @@
                     }
                   ],
                   "description": "The level of the rule: error, warn, info or off."
+                },
+                "pedantic": {
+                  "description": "Also report the pedantic checks, which are noisier. Unset, they run under the pedantic profile.",
+                  "type": "boolean"
                 }
               },
               "type": "object"
