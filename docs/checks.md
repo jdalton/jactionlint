@@ -39,6 +39,7 @@ List of checks:
 - [Popular action inputs validation at `with:`](#check-popular-action-inputs)
 - [Outdated popular actions detection at `uses:`](#detect-outdated-popular-actions)
 - [Shell name validation at `shell:`](#check-shell-names)
+- [Scripts folded into one line](#check-multiline-plain-run)
 - [Run script policy (pedantic)](#check-run-policy)
 - [Job ID and step ID uniqueness](#check-job-step-ids)
 - [Hardcoded credentials](#check-hardcoded-credentials)
@@ -2861,6 +2862,61 @@ need `shell:` so they are not affected.
 
 `max-run-lines` counts non-blank lines in a `run:` script. Comment lines are counted. Its default `max` is 100 lines when the rule
 is enabled by a profile.
+
+<a id="check-multiline-plain-run"></a>
+## Scripts folded into one line
+
+Example input:
+
+```yaml
+on: push
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      # ERROR: without | YAML folds the lines into one, so this is one echo command
+      - run: echo "building"
+          npm ci
+          npm test
+      # OK: a block scalar keeps the lines
+      - run: |
+          echo "building"
+          npm ci
+          npm test
+      # OK: one command wrapped over several lines
+      - run: docker build
+          --tag app
+          .
+```
+
+Output:
+
+```
+test.yaml:9:11: this "run:" is not a block scalar, so YAML folds its 3 lines into one line and the shell runs the single command `echo "building" npm ci npm test`. write `run: |` to keep the lines [multiline-plain-run]
+  |
+9 |           npm ci
+  |           ^~~~~~
+```
+
+[Playground](https://jactionlint.jdx.dev/#eNqkzDEOwyAMheGdUzxldw+Q2wBBCW1qrNjeeviKVkKoa1mQnj/9jVeI6xHCvSVdA2BFrf/A5azUgSdnczpjvwUAUCuiXwVQlytKPhqW5PXcKu9LwHgsT+T6M4zWCLwm8Xdsa/lRLnwKEyayuCOKTNvtPQD6TkJF)
+
+A `run:` that is not written with `|` (or `>`) but over several lines is a plain or quoted YAML scalar, and YAML folds its line breaks into
+spaces. The shell then runs one line: `echo "building" npm ci npm test` prints its arguments and nothing else happens
+([actionlint#441](https://github.com/rhysd/actionlint/issues/441)). The rule `multiline-plain-run` (in the `correctness` profile) reports
+the first line which looks like a command of its own. Wrapping one long command over several lines is common and right, so the rule is
+conservative: a line counts only when it starts with the name of a well-known command (`echo`, `cd`, `npm`, `make`, ...), or with an
+assignment (`x=1`) after a command that takes none (`echo a`), and the line before it is not unfinished: it does not end with `&&`, `|`,
+`\` and the like, does not leave a quote, a bracket or a `${{ }}` open, and does not start with a command that takes another command as
+an argument (`docker`, `ssh`, `sudo`, `xargs`, `find`, ...). Lines separated by a blank line are not compared (the blank line is kept as
+a line break). A script in a block, a script of `shell: python` and a script on one line are never reported.
+
+`--fix` writes the scalar as a block (`run: |`) with one line of the scalar on each line, but only in the narrowest shape, because it
+rewrites a script: the value starts on the line of the `run:` key, and every line is a complete command that starts with a well-known
+command (`echo`, `cd`, `npm`, `git`, `make`, ...). A script with an assignment, a keyword, an operator, a backslash or a heredoc, a
+line that continues the command before it (`make test` then `CC=gcc`), a quote, bracket, backtick or `$(` that stays open at the end of
+a line, a blank line, a `#` or an escape in a double quoted scalar, or text after the scalar gets the finding without a fix, and the
+finding says why. A line that only holds the quote of a quoted scalar is folded into a space like any other line break.
 
 <a id="check-job-step-ids"></a>
 ## Job ID and step ID uniqueness
@@ -8659,7 +8715,7 @@ way because any caller can pass attacker-controlled text. jactionlint does not l
 
 How the rules treat actions:
 
-- **Applies** to the steps (and the metadata) of an action: `action-syntax`, `adhoc-packages`, `archived-uses`, `artipacked`, `background-step-not-waited`, `checkout-static-credentials`, `constant-condition`, `context-availability`, `continue-on-error`, `deprecated-action-input`, `deprecated-commands`, `duplicate-key`, `duplicate-step-id`, `environment-file-redirect`, `expired-ignore`, `expression-syntax`, `expression-type`, `forbidden-uses`, `github-app`, `if-always-true`, `impostor-commit`, `insecure-commands`, `insecure-ssh-keyscan`, `insecure-url-scheme`, `invalid-env-var-name`, `invalid-function-call`, `invalid-id`, `invalid-ignore-comment`, `invalid-local-action`, `invalid-parallel-step`, `invalid-shell-name`, `invalid-uses`, `invisible-characters`, `known-vulnerable-actions`, `malformed-expression-delimiters`, `max-run-lines`, `merge-key`, `misfeature`, `missing-action-input`, `obfuscation`, `outdated-action-runner`, `pipeline-without-pipefail`, `pyflakes`, `recursive-alias`, `ref-confusion`, `ref-version-mismatch`, `repojacking`, `require-expression-wrapping`, `self-repository`, `shellcheck`, `stale-action-refs`, `superfluous-actions`, `template-injection`, `typosquat-uses`, `undefined-function`, `undefined-property`, `unknown-action-input`, `unlocked-install`, `unpinned-images`, `unpinned-tools`, `unpinned-uses`, `unsound-contains`, `unsound-prefix-match`, `unsound-ternary`, `unused-anchor`, `unused-ignore`, `unverified-download`, `use-trusted-publishing`, `yaml-syntax`.
+- **Applies** to the steps (and the metadata) of an action: `action-syntax`, `adhoc-packages`, `archived-uses`, `artipacked`, `background-step-not-waited`, `checkout-static-credentials`, `constant-condition`, `context-availability`, `continue-on-error`, `deprecated-action-input`, `deprecated-commands`, `duplicate-key`, `duplicate-step-id`, `environment-file-redirect`, `expired-ignore`, `expression-syntax`, `expression-type`, `forbidden-uses`, `github-app`, `if-always-true`, `impostor-commit`, `insecure-commands`, `insecure-ssh-keyscan`, `insecure-url-scheme`, `invalid-env-var-name`, `invalid-function-call`, `invalid-id`, `invalid-ignore-comment`, `invalid-local-action`, `invalid-parallel-step`, `invalid-shell-name`, `invalid-uses`, `invisible-characters`, `known-vulnerable-actions`, `malformed-expression-delimiters`, `max-run-lines`, `merge-key`, `misfeature`, `missing-action-input`, `multiline-plain-run`, `obfuscation`, `outdated-action-runner`, `pipeline-without-pipefail`, `pyflakes`, `recursive-alias`, `ref-confusion`, `ref-version-mismatch`, `repojacking`, `require-expression-wrapping`, `self-repository`, `shellcheck`, `stale-action-refs`, `superfluous-actions`, `template-injection`, `typosquat-uses`, `undefined-function`, `undefined-property`, `unknown-action-input`, `unlocked-install`, `unpinned-images`, `unpinned-tools`, `unpinned-uses`, `unsound-contains`, `unsound-prefix-match`, `unsound-ternary`, `unused-anchor`, `unused-ignore`, `unverified-download`, `use-trusted-publishing`, `yaml-syntax`.
 - **Caller-dependent**: `agentic-actions`, `bot-conditions`, `cache-poisoning`, `github-env` (its findings about untrusted input do not depend on the caller), `untrusted-artifact` and `untrusted-checkout`.
 - **Not applicable** because an action does not have what the rule checks, or because only the calling job can decide (`unused-baseline-entry` is about the baseline file, not about a workflow or an action): `anonymous-definition`, `concurrency-cancels-prs`, `concurrency-cancels-release`, `concurrency-limits`, `conflicting-runner-labels`, `cron-too-frequent`, `cyclic-job-needs`, `dangerous-triggers`, `dependabot-cooldown`, `dependabot-execution`, `dependabot-missing-actions-update`, `dependabot-syntax`, `deprecated-runner-label`, `duplicate-job-id`, `duplicate-job-needs`, `duplicate-triggers`, `excessive-permissions`, `gate-job-skipped-on-failure`, `gh-without-token`, `hardcoded-container-credentials`, `insufficient-permissions`, `invalid-activity-type`, `invalid-cron`, `invalid-event-config`, `invalid-event-filter`, `invalid-glob`, `invalid-label-pattern`, `invalid-local-workflow`, `invalid-permissions`, `invalid-timezone`, `invalid-workflow-call`, `invalid-workflow-call-input`, `invalid-workflow-dispatch-input`, `local-action-checkout`, `matrix-duplicate-value`, `matrix-invalid-exclude`, `missing-permissions`, `missing-timeout`, `missing-workflow-input`, `missing-workflow-secret`, `mutable-runner-label`, `overprovisioned-secrets`, `require-shell`, `required-actions`, `secrets-inherit`, `secrets-outside-env`, `self-hosted-runner`, `timeout-too-long`, `ubuntu-slim-limits`, `undefined-job-needs`, `undocumented-permissions`, `unknown-event`, `unknown-runner-label`, `unknown-workflow-input`, `unknown-workflow-secret`, `unredacted-secrets`, `unused-baseline-entry`, `unused-job-output`, `unused-needs`, `unused-workflow-input`, `workflow-call-permissions`, `workflow-input-type`, `workflow-run-names`, `workflow-secret-scope`, `workflow-syntax`.
 
