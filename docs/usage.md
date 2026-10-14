@@ -852,7 +852,7 @@ code you did not touch). The exit status is that of the findings that are shown.
   it, so run one on the default branch too. This is what a filter by position does; jactionlint does not guess which findings "belong" to a change.
 - **It fails when it cannot compare.** An unknown revision, a shallow clone without the merge base (give `actions/checkout` `fetch-depth: 0`),
   or no `git` is an error with exit status 3, never an empty report that looks clean. It cannot be used with stdin, `--fix`, `--diff` or
-  `--baseline-write`, which would apply to a part of the file.
+  `--baseline-write`, which would apply to a part of the file, nor with `--export-facts`, which has no findings to filter.
 - **What it says.** The text format prints `note: N finding(s) outside the changed lines since REV are not shown (--changed-since)` to stderr. The SARIF log has
   `properties.changedSince` (`since`, `scope`, `hidden`), so a consumer can tell it from a full log. `json` and `jsonl` have no place for run
   data and print no note. Without the option nothing changes in any format.
