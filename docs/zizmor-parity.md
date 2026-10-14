@@ -288,6 +288,7 @@ jactionlint" in the harness report. The idea behind some of them is an open issu
 | `concurrency-deadlock`, `event-name-never-received`, `fail-fast-action-inputs` | correctness, pedantic, pedantic | a concurrency group equal to that of a local reusable workflow the job calls; `github.event_name` compared with an event the workflow never receives; an action that passes when nothing was produced and is not told to fail. [Deadlock](checks.md#check-concurrency-deadlock), [event](checks.md#check-event-name-never-received), [inputs](checks.md#check-fail-fast-action-inputs) | fixtures |
 | `hardcoded-registry-credentials` | default | a `password`, `token`, `key` or `auth-key` of a `registries` entry in `dependabot.yml` that is a literal and not a reference (`${{secrets.NAME}}`), and a password in the user information of its `url`. [The check](checks.md#check-hardcoded-registry-credentials) | zizmor [#1222](https://github.com/zizmorcore/zizmor/issues/1222) is open (it proposes the same idea, and folding it with `hardcoded-container-credentials` into one `hardcoded-credentials`); the ID follows `hardcoded-container-credentials`. Not measured against zizmor, which has no such audit. The 76 repositories of the local corpus used for this rule have 42 `dependabot.yml` files, 2 with `registries` (one uses `${{secrets.X}}`, the other has no credential), so there is no finding and no measured false-positive rate, only unit tests and fixtures. A user name is not a credential (the options reference writes a literal one), a username in the URL is not reported, and no fix is offered |
 | `pipeline-without-pipefail` | default | a failure in a pipeline of a `run:` script is hidden because the default shell (`bash -e {0}`) and `shell: sh` do not enable pipefail. zizmor [#288](https://github.com/zizmorcore/zizmor/issues/288) is the open idea | unit tests and fixtures |
+| `shell-syntax` | default | a syntax error in a bash or `sh` script of a `run:` step, found with a bash parser built into jactionlint (mvdan.cc/sh) when shellcheck does not run, and silent when it does. zizmor [#2322](https://github.com/zizmorcore/zizmor/issues/2322) is the open idea (it plans to look for `ERROR` nodes of a tree-sitter grammar) | [the check](checks.md#check-shell-syntax); the numbers are in [shell syntax without shellcheck](#shell-syntax-without-shellcheck) |
 | `agentic-actions` | default | AI agent actions ([zizmor#1605](https://github.com/zizmorcore/zizmor/issues/1605) is a proposal): an agent outsiders can steer without a check of the user, an open gate (`allowed_non_write_users: '*'`), settings that turn safeguards off, an agent on the code of a pull request. [The check](checks.md#check-agentic-actions) | [see below](#agentic-actions) |
 | `unverified-download` | default | a download piped into a shell or an interpreter, a downloaded file made executable and run without a checksum or signature check, TLS verification turned off. The idea is zizmor [#711](https://github.com/zizmorcore/zizmor/issues/711) | [see below](#downloads-and-credentials) |
 | `insecure-ssh-keyscan` | default | `ssh-keyscan` output written to a `known_hosts` file. The idea is zizmor [#2012](https://github.com/zizmorcore/zizmor/issues/2012) | [see below](#downloads-and-credentials) |
@@ -463,13 +464,41 @@ available or `version` is set). That removes 242 findings from the 964 of the sa
 runners, 63 on a matrix runner, 1 self-hosted, 4 in composite actions); the option `pedantic` brings them back. A self-hosted runner
 without buildx is the one case that this does not cover.
 
+## Shell syntax without shellcheck
+
+`shell-syntax` is the part of zizmor [#2322](https://github.com/zizmorcore/zizmor/issues/2322) that needs no tool: it parses the `bash`
+and `sh` scripts of `run:` steps with the Go parser of mvdan.cc/sh (not tree-sitter) and reports only what bash itself rejects while it
+reads a script. It is silent when shellcheck runs. zizmor has no audit of this name yet, so there is no comparison with its findings.
+What was measured, with bash 5.2.21 as the reference (`bash -n` on the same text, after the `${{ }}` expressions were replaced by
+underscores):
+
+- **Real workflows, 52 shallow clones made for this check** (`rust-lang/rust`, `pytorch/pytorch`, `home-assistant/core`,
+  `microsoft/vscode`, `kubernetes/kubernetes`, `NixOS/nixpkgs`, `apache/airflow`, `grafana/grafana`, `jdx/mise` and 43 more) and the 23
+  repositories of `scripts/zizmor-diff/corpus.txt` that exist on the machine: 4,472 workflow and composite action files, 22,437 `run:`
+  steps, of which 13,933 scripts were read (the others are `pwsh`, `python`, `cmd`, custom shells or steps on a runner that is not known to
+  be Linux or macOS), 1,331 of them with a `${{ }}` expression. **No finding**, and the parser and `bash -n` agreed on every script.
+- **Older, larger set of repositories from earlier runs of this project** (not deduplicated: 11,158 files, 62,283 scripts read, 5,208 with an
+  expression): **3 findings, all real**. `apache/superset` `release.yml` has a stray quote (`echo "HAS_TAGS=1" >> $GITHUB_ENV"`) and two
+  `hyperpolymath` repositories have `\"casket\\"}"}` in a `curl` call; `bash -n` fails on all three with "unexpected EOF while looking for matching".
+  The files are snapshots from when the set was made; they may have been fixed since.
+- **Mutated scripts.** Real scripts hide few errors, so 265,265 copies of the scripts above were damaged (a character deleted, a line
+  deleted or swapped, the text cut off, a token such as `"`, `$(`, `fi` or `<<EOF` inserted) with two fresh random seeds and compared with
+  `bash -n`: **0 were reported that bash accepts**, 38,495 were reported and rejected by bash too, and 9,591 were rejected by bash only
+  (not reported: that is the price of the checks below). Earlier rounds of this loop found the cases that the rule now leaves out: an
+  unclosed here-document (bash only warns), a bad `${...}` substitution and a bad arithmetic expression (bash fails at run time), the
+  body of a backquote substitution (parsed at run time), `[[ a =~&& b ]]`, `! ` after a redirection, and an invalid UTF-8 byte.
+
+Not measured: the rule against `dash` (a `shell: sh` script is read with the bash grammar), against the bash 3.2 of macOS and the bash of
+Git for Windows (only bash 5.2 was the reference), the effect of the real values of `${{ }}` expressions (an expression that expands to
+shell syntax can make a script that looks broken valid, or the other way round), scripts that are not UTF-8, and the run time of the rule.
+
 ## What is not done
 
-One idea from the zizmor tracker is **not built** (checked against [rules.md](rules.md) on 2026-10-14): shell syntax errors without
-shellcheck ([#2322](https://github.com/zizmorcore/zizmor/issues/2322)). Two that were not built are now: a rule for a SHA without a version
-comment ([#2316](https://github.com/zizmorcore/zizmor/issues/2316)) is `missing-version-comment`, and credentials in the `registries` of
-`dependabot.yml` ([#1222](https://github.com/zizmorcore/zizmor/issues/1222)) are `hardcoded-registry-credentials` (see [rules of our
-own](#rules-of-our-own)). zizmor does not have a precomputed snapshot of tags or advisories, so there is none to match: the only static
+None of the ideas from the zizmor tracker that were checked against [rules.md](rules.md) on 2026-10-14 is left unbuilt. Three that were not
+built are now: shell syntax errors without shellcheck ([#2322](https://github.com/zizmorcore/zizmor/issues/2322)) is `shell-syntax`, a rule
+for a SHA without a version comment ([#2316](https://github.com/zizmorcore/zizmor/issues/2316)) is `missing-version-comment`, and credentials
+in the `registries` of `dependabot.yml` ([#1222](https://github.com/zizmorcore/zizmor/issues/1222)) are `hardcoded-registry-credentials`
+(see [rules of our own](#rules-of-our-own)). zizmor does not have a precomputed snapshot of tags or advisories, so there is none to match: the only static
 data it ships for these audits is a list of 153 archived repositories (`crates/zizmor/data/archived-repos.txt`), which lets `archived-uses`
 run offline, and `known-vulnerable-actions` asks the advisories API through an HTTP cache (checked in the source of zizmor at commit
 1779f43, not with the harness). jactionlint's `known-vulnerable-actions` reads the advisories of all actions with one request, not one per
