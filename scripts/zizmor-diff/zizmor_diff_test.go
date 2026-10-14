@@ -297,6 +297,12 @@ func TestBuildSkippedRepo(t *testing.T) {
 func TestMarkdown(t *testing.T) {
 	in := fixtureInput(t)
 	rep := Build([]RepoInput{in, {Name: "gone", Skipped: "directory not found"}, {Name: "broken", ZizmorError: "exit 1: boom | bang"}}, testMapping(t), 0)
+	if !rep.HasToolErrors() {
+		t.Fatal("tool failures must make the comparison command fail")
+	}
+	if Build([]RepoInput{{Name: "gone", Skipped: "directory not found"}}, testMapping(t), 0).HasToolErrors() {
+		t.Fatal("skipped repositories are not tool failures")
+	}
 	rep.ZizmorVersion = "1.30.1"
 	var b bytes.Buffer
 	if err := rep.WriteMarkdown(&b); err != nil {
@@ -372,6 +378,20 @@ func TestRun(t *testing.T) {
 	}
 	if diff := cmp.Diff(want, calls); diff != "" {
 		t.Error(diff)
+	}
+}
+
+func TestRunExecutesResolvedZizmorPathInRepository(t *testing.T) {
+	dir := t.TempDir()
+	var calls []string
+	c := &Config{
+		Repos: []Repo{{"r", dir}}, Jactionlint: []string{"jl"},
+		Zizmor:  []string{"/mise/installs/zizmor/1.30.1/zizmor"},
+		Mapping: testMapping(t), Jobs: 1,
+	}
+	Run(context.Background(), fakeRunner(t, 14, readFixture(t, "zizmor.sarif"), &calls), c, &bytes.Buffer{})
+	if len(calls) != 2 || calls[1] != dir+": /mise/installs/zizmor/1.30.1/zizmor --offline --persona pedantic --format sarif ." {
+		t.Fatalf("zizmor command = %v", calls)
 	}
 }
 

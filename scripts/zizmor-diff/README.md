@@ -1,6 +1,6 @@
 # zizmor-diff
 
-zizmor-diff measures how many of the findings of [zizmor](https://docs.zizmor.sh/) jactionlint also reports. It runs both tools over a corpus of repositories and prints a report of the findings that match, the findings that only one tool has, and the zizmor audits that jactionlint has no rule for. Run it by hand when you compare a rule with its zizmor audit.
+`zizmor-diff` compares findings from [zizmor](https://docs.zizmor.sh/) and jactionlint across a corpus of repositories. Its report lists matching findings, findings that only one tool reports, and Zizmor audits with no jactionlint rule. Run it when you compare a rule with its Zizmor audit.
 
 ## When to run it
 
@@ -13,7 +13,7 @@ No CI job and no hk step runs it, because the corpus is a set of local checkouts
 ## Prerequisites
 
 - Go.
-- [mise](https://mise.jdx.dev/), which runs the pinned zizmor with `mise x zizmor@<pinned version> -- zizmor`. mise downloads zizmor on first use, so the first run needs the network. `--help` shows the pinned version.
+- [mise](https://mise.jdx.dev/), which selects the pinned `zizmor` version from this repository's `mise.toml`. The first run might need network access to install it.
 - The repositories of the corpus as local directories. zizmor runs with `--offline`, so nothing else is fetched, unless you pass `--online`.
 - With `--online`: a token in `GITHUB_TOKEN` or `GH_TOKEN`.
 
@@ -25,11 +25,11 @@ Run the tool from the repository root.
 mise run zizmor-diff
 ```
 
-The task builds jactionlint and runs the tool over [corpus.txt](./corpus.txt) with the config [pedantic.yaml](./pedantic.yaml). That corpus lists the checkouts of the maintainer under `~/src`, so on another machine every repository is skipped. Pass your own repositories with `--repos`, which replaces the corpus file:
+The task builds jactionlint and runs the tool over [corpus.txt](./corpus.txt) with the [pedantic.yaml](./pedantic.yaml) config. The corpus lists the maintainer's checkouts under `~/src`; on another machine, the tool skips those missing directories. Pass your own repositories with `--repos` to replace the corpus file:
 
 ```sh
 go build -o jactionlint ./cmd/jactionlint
-go run ./scripts/zizmor-diff \
+mise exec -- go run ./scripts/zizmor-diff \
     --jactionlint ./jactionlint \
     --jactionlint-config scripts/zizmor-diff/pedantic.yaml \
     --repos /path/to/one --repos mine=/path/to/two \
@@ -43,7 +43,7 @@ go run ./scripts/zizmor-diff \
 | `--jactionlint EXE` | The jactionlint executable. A path becomes absolute, because the tool runs it inside each repository. | `jactionlint` from `PATH` |
 | `--jactionlint-config FILE` | A config file for every repository, instead of its own. The tool passes it as `--config-file`. | each repository's own config |
 | `--jactionlint-arg ARG` | An extra jactionlint argument, for example `--profile=correctness`. Repeat it for more. | none |
-| `--zizmor CMD` | The command that runs zizmor. The tool splits it at spaces. | `mise x zizmor@<pinned version> -- zizmor` |
+| `--zizmor CMD` | The command that runs zizmor. The tool splits it at spaces. | the version pinned in this repository's mise config |
 | `--online` | Compares the online audits (`impostor-commit`, `known-vulnerable-actions` and others): jactionlint runs with `--online` and zizmor without `--offline`. It makes GitHub API requests. | off |
 | `--mapping FILE` | An audit mapping instead of the embedded `mapping.json`. | the embedded file |
 | `--line-tolerance N` | The distance in lines that two matching findings may have. `mise run zizmor-diff` passes none, so its figures are not those of [the measurements ledger](../../docs/zizmor-measurements.md), which gives the value of its runs. | 0 |
@@ -51,7 +51,7 @@ go run ./scripts/zizmor-diff \
 | `--markdown FILE` | Where to write the Markdown report. | stdout |
 | `--json FILE` | Where to write the JSON report. | none |
 
-The tool prints `analyzed NAME` to stderr for each repository. It exits with status 0 once it wrote the report, also when a tool failed on a repository, because the report shows that failure. It exits with status 1 when it cannot read the corpus, the corpus is empty, the mapping is invalid or it cannot write a report, and with status 2 for a bad flag.
+The tool prints `analyzed NAME` to stderr for each repository. It exits with status 0 when it writes the report and all tool runs succeed. It exits with status 1 when a tool run fails (after writing the report) or when it cannot read the corpus, the corpus is empty, the mapping is invalid or it cannot write a report. A bad flag exits with status 2.
 
 ### The corpus file
 

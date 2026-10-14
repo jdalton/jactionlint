@@ -4,12 +4,12 @@
 # GOTOOLCHAIN=local, while go.mod's `toolchain go1.27.2` supplies the fixed standard library to builds,
 # tests and govulncheck. Unpin once staticcheck supports the new export data.
 go = "1.27.1"
-node = "lts"
 hk = "latest"
 pkl = "latest"
-shellcheck = "latest"
+shellcheck = "0.11.0"
+zizmor = "1.30.1"
 uv = "latest"
-"pipx:pyflakes" = "latest"
+"pipx:pyflakes" = "4.0.3"
 "go:honnef.co/go/tools/cmd/staticcheck" = "latest"
 "go:golang.org/x/vuln/cmd/govulncheck" = "latest"
 
@@ -47,10 +47,30 @@ description = "Record newly registered rule IDs in testdata/rule_ids.d/<name>.tx
 run = "go test -run TestRuleIDsAreStable -update-rule-ids={{arg(name=\"name\")}} ."
 
 [tasks.test]
-description = "Run all tests"
+description = "Run all Go tests"
 run = "go test -race ./..."
 # -race needs cgo, which is hard to set up on Windows
 run_windows = "go test ./..."
+
+[tasks."upstream:setup"]
+description = "On demand, materialize all four pinned sparse upstream references for review and updates"
+run = "bash ./scripts/upstream/run-node.sh node ./scripts/upstream/main.mjs setup"
+run_windows = "pwsh -NoProfile -File ./scripts/upstream/run-node.ps1 node ./scripts/upstream/main.mjs setup"
+
+[tasks."upstream:check"]
+description = "Check accepted pins without fetching unmaterialized upstream references"
+run = "bash ./scripts/upstream/run-node.sh node ./scripts/upstream/main.mjs check"
+run_windows = "pwsh -NoProfile -File ./scripts/upstream/run-node.ps1 node ./scripts/upstream/main.mjs check"
+
+[tasks."upstream:update"]
+description = "Check latest releases and advance candidates with no source review required"
+run = "bash ./scripts/upstream/run-node.sh node ./scripts/upstream/main.mjs update --apply-latest"
+run_windows = "pwsh -NoProfile -File ./scripts/upstream/run-node.ps1 node ./scripts/upstream/main.mjs update --apply-latest"
+
+[tasks."upstream:test"]
+description = "Test upstream management (98% line, 70% branch, 98% function coverage)"
+run = "bash ./scripts/upstream/run-node.sh node --experimental-test-coverage --test-coverage-include=scripts/upstream/main.mjs --test-coverage-include=scripts/upstream/feature-review.mjs --test-coverage-lines=98 --test-coverage-branches=70 --test-coverage-functions=98 --test ./scripts/upstream/main.test.mjs"
+run_windows = "pwsh -NoProfile -File ./scripts/upstream/run-node.ps1 node --experimental-test-coverage --test-coverage-include=scripts/upstream/main.mjs --test-coverage-include=scripts/upstream/feature-review.mjs --test-coverage-lines=98 --test-coverage-branches=70 --test-coverage-functions=98 --test ./scripts/upstream/main.test.mjs"
 
 [tasks.cov]
 description = "Generate coverage.html and print the coverage per function"
@@ -97,8 +117,8 @@ run = "bash ./scripts/build-man.bash"
 
 [tasks.matcher]
 description = "Generate .github/jactionlint-matcher.json"
-tools = { node = "lts" }
-run = "node ./scripts/generate-jactionlint-matcher/main.mjs .github/jactionlint-matcher.json"
+run = "bash ./scripts/upstream/run-node.sh node ./scripts/generate-jactionlint-matcher/main.mjs .github/jactionlint-matcher.json"
+run_windows = "pwsh -NoProfile -File ./scripts/upstream/run-node.ps1 node ./scripts/generate-jactionlint-matcher/main.mjs .github/jactionlint-matcher.json"
 
 [tasks."matcher:fixtures"]
 description = "Update the test data of generate-jactionlint-matcher after the default error format changes"
@@ -110,7 +130,7 @@ run = [
 ]
 
 [tasks.zizmor-diff]
-description = "Compare jactionlint with zizmor 1.30.1 over the repositories in scripts/zizmor-diff/corpus.txt (see scripts/zizmor-diff/README.md)"
+description = "Compare jactionlint with the pinned zizmor version over scripts/zizmor-diff/corpus.txt"
 depends = ["build"]
 run = "go run ./scripts/zizmor-diff --jactionlint ./jactionlint --jactionlint-config scripts/zizmor-diff/pedantic.yaml"
 
@@ -134,26 +154,31 @@ run = "bash ./scripts/build-wasm.bash"
 description = "Run the documentation site (VitePress) with live reload"
 depends = ["docs:wasm"]
 dir = "docs"
-run = "npm install && exec npm run docs:dev"
+run = ["bash ../scripts/upstream/run-node.sh npm install", "bash ../scripts/upstream/run-node.sh npm run docs:dev"]
+run_windows = ["pwsh -NoProfile -File ../scripts/upstream/run-node.ps1 npm install", "pwsh -NoProfile -File ../scripts/upstream/run-node.ps1 npm run docs:dev"]
 
 [tasks."docs:build"]
 description = "Build the documentation site (VitePress) into docs/.vitepress/dist; fails on dead links, lost anchors and dead #fragments"
 depends = ["docs:wasm"]
 dir = "docs"
-run = "npm ci && npm run docs:build && npm run verify"
+run = ["bash ../scripts/upstream/run-node.sh npm ci", "bash ../scripts/upstream/run-node.sh npm run docs:build", "bash ../scripts/upstream/run-node.sh npm run verify"]
+run_windows = ["pwsh -NoProfile -File ../scripts/upstream/run-node.ps1 npm ci", "pwsh -NoProfile -File ../scripts/upstream/run-node.ps1 npm run docs:build", "pwsh -NoProfile -File ../scripts/upstream/run-node.ps1 npm run verify"]
 
 [tasks."docs:og"]
 description = "Render the social card (og.png, made by the docs build) into docs/.vitepress/cache/og.png to look at it"
 dir = "docs"
-run = "npm ci && node .vitepress/og/og.ts .vitepress/cache/og.png"
+run = ["bash ../scripts/upstream/run-node.sh npm ci", "bash ../scripts/upstream/run-node.sh node --experimental-strip-types .vitepress/og/og.ts .vitepress/cache/og.png"]
+run_windows = ["pwsh -NoProfile -File ../scripts/upstream/run-node.ps1 npm ci", "pwsh -NoProfile -File ../scripts/upstream/run-node.ps1 node --experimental-strip-types .vitepress/og/og.ts .vitepress/cache/og.png"]
 
 [tasks."docs:preview"]
 description = "Serve the built documentation site"
 dir = "docs"
-run = "npm run docs:preview"
+run = "bash ../scripts/upstream/run-node.sh npm run docs:preview"
+run_windows = "pwsh -NoProfile -File ../scripts/upstream/run-node.ps1 npm run docs:preview"
 
 [tasks."docs:test"]
 description = "Test the playground: permalink codec and the real wasm against the links in docs/checks.md"
 depends = ["docs:wasm"]
 dir = "docs"
-run = "npm ci && npm test"
+run = ["bash ../scripts/upstream/run-node.sh npm ci", "bash ../scripts/upstream/run-node.sh npm test"]
+run_windows = ["pwsh -NoProfile -File ../scripts/upstream/run-node.ps1 npm ci", "pwsh -NoProfile -File ../scripts/upstream/run-node.ps1 npm test"]

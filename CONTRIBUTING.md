@@ -38,7 +38,7 @@ To propose a check, describe the construct, show a workflow that the check repor
 <a id="development"></a>
 ## Set up
 
-You need git and [mise](https://mise.jdx.dev/). mise installs the tools that `mise.toml` pins and runs the tasks of the repository.
+You need git and [mise](https://mise.jdx.dev/). mise installs the tools pinned in `mise.toml` and runs the repository's tasks.
 
 ```sh
 git clone https://github.com/jdx/jactionlint.git
@@ -48,10 +48,42 @@ mise run build
 ./jactionlint --version
 ```
 
-`mise install` provides Go, node (the LTS release), hk, pkl, shellcheck, uv, pyflakes, staticcheck and govulncheck. The `man` task installs the Ruby that it needs when you run it.
+`mise install` provides Go, hk, pkl, ShellCheck, Zizmor, uv, Pyflakes, staticcheck and govulncheck. The `man` task installs Ruby when needed. Node-backed tasks use Node.js 22.12 or later from `PATH`, or a task-scoped LTS version from mise.
+
+The updater tracks sparse, pinned source references for Actionlint, Zizmor, ShellCheck and Pyflakes. Their detection patterns,
+scans and tests help identify behavior jactionlint should cover; the pins do not promise API compatibility or runtime
+interoperability.
+
+Check accepted pins and review available releases without materializing upstream checkouts:
+
+```sh
+mise run upstream:check
+mise run upstream:update
+```
+
+When you need to inspect a source tree, materialize only that reference:
+
+```sh
+mise exec node@lts -- node ./scripts/upstream/main.mjs <source> setup
+```
+
+`mise run upstream:setup` explicitly materializes all four sparse references.
+
+`upstream:update` checks every source in the manifest. It applies candidates that pass checks and need no source review; it reports the others with their tag and SHA. Adding a source does not require another task.
+
+After reviewing a candidate, apply its reported tag and SHA:
+
+```sh
+mise exec node@lts -- node ./scripts/upstream/main.mjs <source> update --apply <tag> <sha> --accept-reviewed
+```
+
+Applying a pin materializes that source's sparse checkout if needed. Pin checks and ordinary test runs leave missing
+upstream checkouts untouched.
+
+Use the [upstream feature review guide](docs/upstream-feature-review.md) to review and port relevant behavior. Updating a pin alone does not implement it.
 
 - **Go.** Builds, tests and govulncheck use the toolchain that `go.mod` selects. The Go entry of `mise.toml` is pinned for staticcheck, which cannot read the export data of a newer toolchain: read the comment above it before you change it.
-- **Missing tools.** A test that needs shellcheck, pyflakes or a `node` that supports the github-script check skips itself when the tool is missing, so a green run without them proves less. `mise install` provides all three.
+- **Missing tools.** Tests skip ShellCheck and Pyflakes checks when those tools are missing. The `github-script` test also skips without Node.js on `PATH`. `mise install` provides ShellCheck and Pyflakes.
 - **Windows.** CI runs the unit tests, the tests of the action and the tests of the download script on Windows. `mise run test` leaves out `-race` there, because `-race` needs cgo. The tool that maintains `docs/checks.md` runs on Linux and macOS only.
 
 `mise tasks` lists every task. These are the ones you use while you develop:

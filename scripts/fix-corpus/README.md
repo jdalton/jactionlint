@@ -12,7 +12,7 @@ No CI job and no hk step runs it, because the corpus is a set of repositories th
 
 - Go, and a built jactionlint (see Usage). `mise run fix-corpus` builds it for you.
 - Repositories to fix: directories with a `.github` directory. Without arguments the tool reads the maintainer's checkouts, `~/src/*-jactionlint` and `~/src/mise`. Pass your own directories as arguments.
-- zizmor, unless you pass `-no-zizmor`. The default command, `mise x zizmor@<pinned version> -- zizmor`, downloads the pinned zizmor on first use, so it needs the network once. `-h` shows the pinned version.
+- zizmor, unless you pass `-no-zizmor`. The tool resolves the version pinned in this repository's `mise.toml` before it enters each corpus repository, then runs that executable there. The first run might need network access to install zizmor.
 
 ## Usage
 
@@ -22,7 +22,7 @@ Run the tool from the repository root, because the default config path is relati
 mise run fix-corpus
 ```
 
-The task builds jactionlint and runs the tool without arguments. To choose the repositories and the options, run the build and the tool yourself:
+The task builds jactionlint and uses the default corpus. To choose repositories and options, build the binary and run the tool directly:
 
 ```sh
 go build -o jactionlint ./cmd/jactionlint
@@ -33,7 +33,7 @@ go run ./scripts/fix-corpus -jactionlint ./jactionlint -no-zizmor ~/src/my-repos
 | --- | --- | --- |
 | `-jactionlint EXE` | The jactionlint executable. | `jactionlint` from `PATH` |
 | `-config FILE` | The config file that jactionlint uses for every repository. | `scripts/fix-corpus/config.yaml` |
-| `-zizmor CMD` | The command that runs zizmor. The tool splits it at spaces, so it cannot hold quotes. | `mise x zizmor@<pinned version> -- zizmor` |
+| `-zizmor CMD` | The command that runs zizmor. The tool splits it at spaces, so it cannot hold quotes. | the version pinned in this repository's mise config |
 | `-no-zizmor` | Skips check 4, the comparison with zizmor. | off |
 | `-unsafe` | Applies the unsafe fixes too (`--fix=unsafe`). | off |
 | `-keep DIR` | Keeps the fixed copies in DIR, as `DIR/NN-label/.github`, where NN is the position of the repository in the list. Compare them with `diff -ru`. | a temporary directory, which the tool removes unless a repository has a problem |

@@ -16,6 +16,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/jdx/jactionlint/v2/internal/toolcmd"
 )
 
 // Runner runs a command in dir and returns its stdout and exit code. A non-zero exit code is not an error.
@@ -191,7 +193,7 @@ func realMain(args []string, stdout, stderr io.Writer) int {
 	jlConfig := fs.String("jactionlint-config", "", "jactionlint config file used instead of each repository's own (passed as --config-file)")
 	var jlArgs listFlag
 	fs.Var(&jlArgs, "jactionlint-arg", "extra jactionlint argument. Repeatable")
-	zz := fs.String("zizmor", "mise x zizmor@1.30.1 -- zizmor", "zizmor command (split on spaces)")
+	zz := fs.String("zizmor", "", "zizmor command (split on spaces; default uses the version pinned by this repository's mise.toml)")
 	mapPath := fs.String("mapping", "", "audit mapping file (default: the embedded mapping.json)")
 	tol := fs.Int("line-tolerance", 0, "lines of distance allowed between a zizmor finding and the jactionlint finding covering it")
 	online := fs.Bool("online", false, "compare the online audits: run jactionlint with --online and zizmor without --offline. Needs GITHUB_TOKEN or GH_TOKEN and makes GitHub API requests")
@@ -253,9 +255,9 @@ func realMain(args []string, stdout, stderr io.Writer) int {
 		}
 		extra = append(extra, "--config-file", abs)
 	}
-	zzCmd := strings.Fields(*zz)
-	if len(zzCmd) == 0 {
-		return fail(errors.New("-zizmor is empty"))
+	zzCmd, err := toolcmd.Resolve(*zz, "zizmor")
+	if err != nil {
+		return fail(err)
 	}
 
 	rep := Run(context.Background(), execRunner, &Config{
@@ -282,6 +284,9 @@ func realMain(args []string, stdout, stderr io.Writer) int {
 	}
 	if err := rep.WriteMarkdown(w); err != nil {
 		return fail(err)
+	}
+	if rep.HasToolErrors() {
+		return 1
 	}
 	return 0
 }
