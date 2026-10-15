@@ -19,22 +19,21 @@ import (
 // The key is the fixture, the value maps a prefix of the expected line to the reason.
 var actionlintExceptions = map[string]map[string]string{}
 
-// TestCorrectnessProfileKeepsEveryErrorOfActionlint runs the fixtures that came from rhysd/actionlint (listed in
-// testdata/actionlint_originals.txt: the files of testdata/err and testdata/examples that were not added by the
-// jactionlint project) with `profile: correctness` and no other setting, and asserts that every error that their
+// TestCorrectnessProfileKeepsEveryErrorOfActionlint runs the original rhysd/actionlint fixtures with
+// `profile: correctness` and no other setting, and asserts that every error their
 // .out file expects is still reported. The profile may report more (the bug detectors of jactionlint), so errors
 // that are not expected are not looked at. This is the promise of "Coming from actionlint" in docs/actionlint.md.
 func TestCorrectnessProfileKeepsEveryErrorOfActionlint(t *testing.T) {
-	b, err := os.ReadFile(filepath.Join("testdata", "actionlint_originals.txt"))
-	if err != nil {
-		t.Fatal(err)
-	}
 	shellcheck, pyflakes := "", ""
 	if p, err := execabs.LookPath("shellcheck"); err == nil {
 		shellcheck = p
 	}
 	if p, err := execabs.LookPath("pyflakes"); err == nil {
 		pyflakes = p
+	}
+	b, err := os.ReadFile(filepath.Join("testdata", "actionlint_originals.txt"))
+	if err != nil {
+		t.Fatal(err)
 	}
 	var files []string
 	for _, l := range strings.Split(string(b), "\n") {
@@ -45,7 +44,6 @@ func TestCorrectnessProfileKeepsEveryErrorOfActionlint(t *testing.T) {
 	if len(files) < 100 {
 		t.Fatalf("the list of the original fixtures is too short: %d", len(files))
 	}
-	proj := func(f string) *Project { return &Project{root: filepath.Dir(f)} }
 	for _, f := range files {
 		name := filepath.ToSlash(f)
 		t.Run(strings.TrimSuffix(strings.TrimPrefix(name, "testdata/"), ".yaml"), func(t *testing.T) {
@@ -63,6 +61,7 @@ func TestCorrectnessProfileKeepsEveryErrorOfActionlint(t *testing.T) {
 				}
 				o.Pyflakes = pyflakes
 			}
+			// The curated fixture copy and its golden output are specific to jactionlint.
 			src, err := os.ReadFile(f)
 			if err != nil {
 				t.Fatal(err)
@@ -78,7 +77,7 @@ func TestCorrectnessProfileKeepsEveryErrorOfActionlint(t *testing.T) {
 				cfg.Profile = ProfileCorrectness
 			}
 			l.defaultConfig = cfg
-			errs, err := l.Lint("test.yaml", src, proj(f))
+			errs, err := l.Lint("test.yaml", src, &Project{root: filepath.Dir(f)})
 			if err != nil {
 				t.Fatal(err)
 			}

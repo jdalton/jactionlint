@@ -20,15 +20,50 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+      - name: Restore Go modules
+        id: go-mod-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'go.sum', 'mise.toml') }}
+          restore-keys: go-mod-${{ runner.os }}-${{ runner.arch }}-
+      - name: Download Go modules
+        run: go mod download
+      - name: Save Go modules
+        if: steps.go-mod-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ steps.go-mod-cache.outputs.cache-primary-key }}
+      - name: Restore Go build and test cache
+        id: go-build-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.os == 'Windows' && '~/AppData/Local/go-build' || runner.os == 'macOS' && '~/Library/Caches/go-build' || '~/.cache/go-build' }}
+          key: go-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'go.sum', 'mise.toml') }}-${{ hashFiles('**/*.go') }}
+          restore-keys: |
+            go-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'go.sum', 'mise.toml') }}-
       - parallel:
+          - name: Test Go packages with race detector
+            if: matrix.os == 'ubuntu-latest'
+            run: go test -race ./...
           - name: Test Go packages
-            run: go test -v -race ./...
+            if: matrix.os == 'macos-latest'
+            run: go test ./...
+          - name: Test Go packages (Windows)
+            if: matrix.os == 'windows-latest'
+            shell: pwsh
+            run: pwsh -NoProfile -File ./scripts/ci/test-windows.ps1
+          - name: Check upstream pins
+            run: mise run upstream:check
+          - name: Test upstream manager
+            run: mise run upstream:test
           - name: Build without cgo
             run: go build ./cmd/jactionlint
             env:
@@ -36,6 +71,12 @@ jobs:
               CGO_ENABLED: 0
           - name: Build with race instrumentation
             run: go build -race -o jactionlint-race ./cmd/jactionlint
+      - name: Save Go build and test cache
+        if: always() && steps.go-build-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.os == 'Windows' && '~/AppData/Local/go-build' || runner.os == 'macOS' && '~/Library/Caches/go-build' || '~/.cache/go-build' }}
+          key: ${{ steps.go-build-cache.outputs.cache-primary-key }}
       - name: Dog fooding 🐶
         run: |
           echo "::add-matcher::.github/jactionlint-matcher.json"

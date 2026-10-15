@@ -67,6 +67,15 @@ type Report struct {
 	Unmapped        []AuditRow   `json:"unmapped_audits"`
 }
 
+func (r *Report) HasToolErrors() bool {
+	for _, repo := range r.Repos {
+		if repo.JactionlintError != "" || repo.ZizmorError != "" {
+			return true
+		}
+	}
+	return false
+}
+
 const maxExamples = 5
 
 // Build compares the findings of each repository and aggregates them.

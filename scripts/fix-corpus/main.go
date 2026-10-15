@@ -37,6 +37,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/jdx/jactionlint/v2/internal/toolcmd"
 	"go.yaml.in/yaml/v4"
 )
 
@@ -57,11 +58,19 @@ type repoReport struct {
 func main() {
 	jal := flag.String("jactionlint", "jactionlint", "the jactionlint executable")
 	cfg := flag.String("config", "", "config file for jactionlint (default: config.yaml next to this program's source)")
-	zizmor := flag.String("zizmor", "mise x zizmor@1.30.1 -- zizmor", "command that runs zizmor")
+	zizmor := flag.String("zizmor", "", "command that runs zizmor (default uses the version pinned by this repository's mise.toml)")
 	noZizmor := flag.Bool("no-zizmor", false, "do not compare with zizmor")
 	unsafe := flag.Bool("unsafe", false, "apply the unsafe fixes too (--fix=unsafe)")
 	keep := flag.String("keep", "", "keep the fixed copies in this directory instead of a temporary one")
 	flag.Parse()
+	var zizmorCommand []string
+	if !*noZizmor {
+		var err error
+		zizmorCommand, err = toolcmd.Resolve(*zizmor, "zizmor")
+		if err != nil {
+			fatal(err)
+		}
+	}
 
 	if *cfg == "" {
 		*cfg = "scripts/fix-corpus/config.yaml"
@@ -106,7 +115,7 @@ func main() {
 	for i, dir := range dirs {
 		r := &repoReport{Label: strings.TrimSuffix(filepath.Base(dir), "-jactionlint"), Dir: dir}
 		work := filepath.Join(scratch, fmt.Sprintf("%02d-%s", i, r.Label))
-		run(r, exe, cfgPath, *zizmor, !*noZizmor, mode, dir, work)
+		run(r, exe, cfgPath, zizmorCommand, !*noZizmor, mode, dir, work)
 		if len(r.Problems) > 0 {
 			failed = true
 		}
@@ -123,7 +132,7 @@ func fatal(err error) {
 	os.Exit(2)
 }
 
-func run(r *repoReport, exe, cfg, zizmor string, withZizmor bool, mode, src, work string) {
+func run(r *repoReport, exe, cfg string, zizmor []string, withZizmor bool, mode, src, work string) {
 	gh := filepath.Join(src, ".github")
 	if st, err := os.Stat(gh); err != nil || !st.IsDir() {
 		r.Skipped = "no .github directory"
@@ -303,10 +312,9 @@ func lintCounts(exe, cfg, dir string) (map[string]int, error) {
 	return counts, nil
 }
 
-func zizmorCounts(zizmor, dir string) (map[string]int, error) {
-	parts := strings.Fields(zizmor)
-	args := append(parts[1:], "--offline", "--persona", "pedantic", "--format", "json", "--no-exit-codes", "--no-progress", dir)
-	cmd := exec.Command(parts[0], args...)
+func zizmorCounts(zizmor []string, dir string) (map[string]int, error) {
+	args := append(append([]string{}, zizmor[1:]...), "--offline", "--persona", "pedantic", "--format", "json", "--no-exit-codes", "--no-progress", dir)
+	cmd := exec.Command(zizmor[0], args...)
 	var so, se bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &so, &se
 	if err := cmd.Run(); err != nil {
