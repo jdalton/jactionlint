@@ -187,6 +187,7 @@ ignores:
 | `uses` | string | The `uses:` value of the step, or of the job when it calls a reusable workflow. See [Forms of `uses`](#forms-of-uses). |
 | `reason` | string | Why the finding is accepted. It is free text for the readers of the file, and it appears in the messages about the entry. |
 | `expires` | string `YYYY-MM-DD` | The entry suppresses through the end of that day (UTC) and stops after it. Write the date in quotes. |
+| `allow-unused` | boolean | `true` keeps the entry from being reported as [`unused-ignore`](./rules.md#unused-ignore) when it suppresses nothing, for a finding that comes and goes, such as a moving tag. Expiry is still checked. Default `false`. |
 
 An entry needs at least one of `file`, `uses`, `job` and `step`. To turn a rule off everywhere, use [`rules`](#rule-levels-and-options). Every key that an entry sets must match, and entries are not combined: two entries are two independent reasons to ignore.
 
@@ -211,7 +212,7 @@ jactionlint finds the job and the step whose YAML block contains the line of the
 ### Expiry and unused entries
 
 - On the day after `expires`, the entry stops suppressing: the findings it hid come back. The entry itself is reported as [`expired-ignore`](./rules.md#expired-ignore) (level `error`, in the `correctness` profile) at its position in the config file, with its `reason`. Fix the findings or renew the date.
-- During the last 14 days, the entry still works and is reported as `expired-ignore` with level `info`, so you are warned before the findings come back. An entry that is about to expire and suppresses nothing is also reported as `unused-ignore`.
+- During the last 14 days, the entry still works and is reported as `expired-ignore` with level `info`, so you are warned before the findings come back. An entry that is about to expire and suppresses nothing is also reported as `unused-ignore`, unless it sets `allow-unused: true`.
 - An entry that suppressed nothing is reported as [`unused-ignore`](./rules.md#unused-ignore) at its position in the config file. This is the rule that also reports unused ignore comments, so it is in the `pedantic` profile.
 - A pre-commit hook lints only the changed files, so an entry is called unused only when every file it could apply to was linted in the run. A run that lints a single file never reports an entry that also applies to others.
 - An entry for a rule that did not run is not unused: the rule is off, it is an online rule and the online checks are off, or it is `shellcheck` or `pyflakes` without its command.
